@@ -6,6 +6,13 @@
   "update_source": "233tv-xiaaa-aaaay-aacta-cai",
   "description": "Design, publish, and trade pixel chips between Neutron canisters",
   "src": "main.mo",
+  "backend": {
+    "capabilities": {
+      "backend_calls": {
+        "api": 1
+      }
+    }
+  },
   "tiles": [
     {
       "id": "chipswap",
@@ -15,10 +22,269 @@
       "description": "Design, trade, and collect pixel chips"
     }
   ],
+  "dependencies": {
+    "contacts": {
+      "app": "contacts",
+      "min_version": 101,
+      "functions": [
+        "contacts_neutron_lookup_v2",
+        "contacts_neutron_search_v2"
+      ]
+    }
+  },
+  "capabilities": {
+    "public_ingress": {
+      "api": 1,
+      "routes": [
+        {
+          "protocol": "chipswap_v1",
+          "id": "catalog",
+          "handler": "chipswap_catalog_v1",
+          "mode": "update",
+          "caller": "canister",
+          "max_request_bytes": 1024,
+          "max_response_bytes": 65536,
+          "max_calls_per_hour": 240,
+          "max_calls_per_caller_per_hour": 60,
+          "required_cycles": 300000000
+        },
+        {
+          "protocol": "chipswap_v1",
+          "id": "trade",
+          "handler": "chipswap_trade_v1",
+          "mode": "update",
+          "caller": "canister",
+          "max_request_bytes": 16384,
+          "max_response_bytes": 16384,
+          "max_calls_per_hour": 240,
+          "max_calls_per_caller_per_hour": 60,
+          "required_cycles": 600000000
+        },
+        {
+          "protocol": "chipswap_v1",
+          "id": "deliver",
+          "handler": "chipswap_deliver_v1",
+          "mode": "update",
+          "caller": "canister",
+          "max_request_bytes": 16384,
+          "max_response_bytes": 4096,
+          "max_calls_per_hour": 240,
+          "max_calls_per_caller_per_hour": 60,
+          "required_cycles": 600000000
+        },
+        {
+          "protocol": "chipswap_v1",
+          "id": "status",
+          "handler": "chipswap_status_v1",
+          "mode": "update",
+          "caller": "canister",
+          "max_request_bytes": 1024,
+          "max_response_bytes": 16384,
+          "max_calls_per_hour": 240,
+          "max_calls_per_caller_per_hour": 60,
+          "required_cycles": 200000000
+        },
+        {
+          "protocol": "chipswap_v1",
+          "id": "announce",
+          "handler": "chipswap_announce_v1",
+          "mode": "update",
+          "caller": "canister",
+          "max_request_bytes": 4096,
+          "max_response_bytes": 4096,
+          "max_calls_per_hour": 240,
+          "max_calls_per_caller_per_hour": 60,
+          "required_cycles": 200000000
+        }
+      ]
+    },
+    "preapproved_self_calls": {
+      "api": 1,
+      "methods": [
+        "chipswap_status",
+        "chipswap_designs",
+        "chipswap_design",
+        "chipswap_collection",
+        "chipswap_directory",
+        "chipswap_store",
+        "chipswap_trades",
+        "chipswap_brushes",
+        "chipswap_contacts_suggestions",
+        "chipswap_draft_create",
+        "chipswap_draft_save",
+        "chipswap_draft_delete",
+        "chipswap_publish",
+        "chipswap_set_trade_mode",
+        "chipswap_directory_add",
+        "chipswap_directory_remove",
+        "chipswap_set_auto_announce",
+        "chipswap_brush_save",
+        "chipswap_brush_delete",
+        "chipswap_trade_forget",
+        "chipswap_announce",
+        "chipswap_fetch_catalogs",
+        "chipswap_trade_propose",
+        "chipswap_trade_resolve",
+        "chipswap_trade_accept",
+        "chipswap_trade_decline"
+      ]
+    },
+    "backend_calls": {
+      "api": 1,
+      "description": "Trade chips with other Chipswap Neutron canisters",
+      "reservation_scopes": [
+        "method"
+      ],
+      "install_reservations": [
+        {
+          "kind": "method",
+          "method": "app_chipswap__chipswap_v1_update"
+        }
+      ],
+      "max_concurrency": 8,
+      "max_cycles_per_call": 600000000,
+      "max_cycles_per_day": 2400000000000
+    }
+  },
   "func": {
     "chipswap_status": {
       "type": "query",
       "async": false
+    },
+    "chipswap_designs": {
+      "type": "query",
+      "async": false
+    },
+    "chipswap_design": {
+      "type": "query",
+      "async": false
+    },
+    "chipswap_collection": {
+      "type": "query",
+      "async": false
+    },
+    "chipswap_directory": {
+      "type": "query",
+      "async": false
+    },
+    "chipswap_store": {
+      "type": "query",
+      "async": false
+    },
+    "chipswap_trades": {
+      "type": "query",
+      "async": false
+    },
+    "chipswap_brushes": {
+      "type": "query",
+      "async": false
+    },
+    "chipswap_contacts_suggestions": {
+      "type": "query",
+      "async": false
+    },
+    "chipswap_draft_create": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_draft_save": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_draft_delete": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_publish": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_set_trade_mode": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_directory_add": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_directory_remove": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_set_auto_announce": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_brush_save": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_brush_delete": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_trade_forget": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_announce": {
+      "type": "update",
+      "async": "async*"
+    },
+    "chipswap_fetch_catalogs": {
+      "type": "update",
+      "async": "async*"
+    },
+    "chipswap_trade_propose": {
+      "type": "update",
+      "async": "async*"
+    },
+    "chipswap_trade_resolve": {
+      "type": "update",
+      "async": "async*"
+    },
+    "chipswap_trade_accept": {
+      "type": "update",
+      "async": "async*"
+    },
+    "chipswap_trade_decline": {
+      "type": "update",
+      "async": "async*"
+    },
+    "chipswap_catalog_v1": {
+      "type": "update",
+      "async": false,
+      "arg": [
+        "caller"
+      ]
+    },
+    "chipswap_trade_v1": {
+      "type": "update",
+      "async": false,
+      "arg": [
+        "caller"
+      ]
+    },
+    "chipswap_deliver_v1": {
+      "type": "update",
+      "async": false,
+      "arg": [
+        "caller"
+      ]
+    },
+    "chipswap_status_v1": {
+      "type": "update",
+      "async": false,
+      "arg": [
+        "caller"
+      ]
+    },
+    "chipswap_announce_v1": {
+      "type": "update",
+      "async": false,
+      "arg": [
+        "caller"
+      ]
     }
   },
   "memory": {
