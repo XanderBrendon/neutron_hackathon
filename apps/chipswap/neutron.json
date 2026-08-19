@@ -1,0 +1,35 @@
+{
+  "format": 3,
+  "name": "Chipswap",
+  "id": "chipswap",
+  "version": 100,
+  "update_source": "233tv-xiaaa-aaaay-aacta-cai",
+  "description": "Design, publish, and trade pixel chips between Neutron canisters",
+  "src": "main.mo",
+  "tiles": [
+    {
+      "id": "chipswap",
+      "title": "Chipswap",
+      "path": "index.html",
+      "icon": "static/icon.svg",
+      "description": "Design, trade, and collect pixel chips"
+    }
+  ],
+  "func": {
+    "chipswap_status": {
+      "type": "query",
+      "async": false
+    }
+  },
+  "memory": {
+    "chipswap": {
+      "version": 1,
+      "schemas": {
+        "1": {
+          "src": "memory/chipswap/v1.mo"
+        }
+      },
+      "migrations": []
+    }
+  }
+}

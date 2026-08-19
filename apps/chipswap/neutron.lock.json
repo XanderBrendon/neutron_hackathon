@@ -1,0 +1,15 @@
+{
+  "format": 2,
+  "app": "chipswap",
+  "memory": {
+    "chipswap": {
+      "schemas": {
+        "1": {
+          "hash": "afd2e0fdd90d3f5f8aac76796830cc6e4864a2dda1b78372ff475abd59dbddf3",
+          "entry": "afd2e0fdd90d3f5f8aac76796830cc6e4864a2dda1b78372ff475abd59dbddf3"
+        }
+      },
+      "migrations": {}
+    }
+  }
+}

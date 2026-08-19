@@ -1,0 +1,28 @@
+@use "neutron-design-system/styles.scss";
+
+@layer nt.tokens, nt.base, nt.layout, nt.components, nt.utilities, app;
+
+@layer app {
+  .nt-app.chipswap {
+    --nt-accent: #7fd1c1;
+    --nt-accent-muted: #17302c;
+    container-type: inline-size;
+    min-height: 100dvh;
+    padding: var(--nt-pad-4);
+  }
+
+  .chipswap-shell {
+    display: flex;
+    flex-direction: column;
+    gap: var(--nt-gap-3);
+    margin: 0 auto;
+    min-height: calc(100dvh - (var(--nt-pad-4) * 2));
+    width: min(100%, 1180px);
+  }
+
+  .chipswap-status {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--nt-gap-3);
+  }
+}
