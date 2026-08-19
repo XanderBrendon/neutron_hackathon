@@ -17,12 +17,356 @@
     gap: var(--nt-gap-3);
     margin: 0 auto;
     min-height: calc(100dvh - (var(--nt-pad-4) * 2));
-    width: min(100%, 1180px);
+    width: min(100%, 1240px);
   }
 
-  .chipswap-status {
+  .chipswap-header {
+    align-items: start;
+    gap: var(--nt-gap-3);
+  }
+
+  .chipswap-heading {
+    display: grid;
+    gap: var(--nt-gap-2);
+    min-width: 0;
+  }
+
+  .chipswap-summary {
+    flex: 0 1 260px;
+    font-size: var(--nt-font-size-meta);
+    justify-items: end;
+    text-align: right;
+  }
+
+  .chipswap-tabs .nt-tab {
+    align-items: center;
+    display: inline-flex;
+    gap: var(--nt-gap-1);
+  }
+
+  .chipswap-badge {
+    margin-left: var(--nt-gap-1);
+  }
+
+  .chipswap-main {
+    display: block;
+    min-width: 0;
+  }
+
+  /* ---------- chip canvas ---------- */
+
+  .chipswap-canvas {
+    display: block;
+    flex: 0 0 auto;
+    position: relative;
+  }
+
+  .chipswap-canvas-base,
+  .chipswap-canvas-overlay {
+    display: block;
+    height: 100%;
+    inset: 0;
+    position: absolute;
+    width: 100%;
+  }
+
+  .chipswap-canvas-base {
+    image-rendering: pixelated;
+  }
+
+  .chipswap-canvas-overlay {
+    touch-action: none;
+  }
+
+  /* ---------- studio ---------- */
+
+  .chipswap-studio {
+    align-items: start;
+    display: grid;
+    gap: var(--nt-gap-3);
+    grid-template-columns: minmax(170px, 220px) minmax(0, 1fr) minmax(240px, 320px);
+    min-width: 0;
+  }
+
+  .chipswap-designs,
+  .chipswap-stage,
+  .chipswap-tools {
+    min-width: 0;
+  }
+
+  .chipswap-design-list {
+    display: grid;
+    gap: var(--nt-gap-2);
+    list-style: none;
+    margin: 0;
+    max-height: 60dvh;
+    overflow-y: auto;
+    padding: 0;
+  }
+
+  .chipswap-design-item {
+    align-items: center;
+    background: var(--nt-bg-panel);
+    border: 0;
+    border-radius: 4px;
+    color: inherit;
+    cursor: pointer;
+    display: flex;
+    gap: var(--nt-gap-2);
+    outline-offset: 2px;
+    padding: var(--nt-pad-2);
+    text-align: left;
+    width: 100%;
+  }
+
+  .chipswap-design-item:hover,
+  .chipswap-design-item--active {
+    background: var(--nt-accent-muted);
+  }
+
+  .chipswap-design-meta {
+    display: grid;
+    gap: var(--nt-gap-1);
+    min-width: 0;
+  }
+
+  .chipswap-design-meta strong {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chipswap-stage {
+    display: grid;
+    gap: var(--nt-gap-3);
+    justify-items: center;
+  }
+
+  .chipswap-stage-head {
+    align-items: end;
     display: flex;
     flex-wrap: wrap;
+    gap: var(--nt-gap-2);
+    justify-content: space-between;
+    width: 100%;
+  }
+
+  .chipswap-editor-canvas {
+    max-width: 100%;
+  }
+
+  .chipswap-actions {
+    flex-wrap: wrap;
+    width: 100%;
+  }
+
+  .chipswap-tools {
+    display: grid;
     gap: var(--nt-gap-3);
+    max-height: 78dvh;
+    overflow-y: auto;
+  }
+
+  .chipswap-swatches {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .chipswap-swatch {
+    align-items: center;
+    border: 1px solid var(--nt-line-soft);
+    border-radius: 3px;
+    cursor: pointer;
+    display: inline-flex;
+    font-size: 10px;
+    height: 26px;
+    justify-content: center;
+    min-width: 26px;
+    padding: 0;
+  }
+
+  .chipswap-swatch--active {
+    border-color: var(--nt-accent);
+    outline: 1px solid var(--nt-accent);
+  }
+
+  .chipswap-color-input {
+    background: none;
+    border: 1px solid var(--nt-line-soft);
+    border-radius: 3px;
+    height: var(--nt-control-sm);
+    padding: 2px;
+    width: 44px;
+  }
+
+  .chipswap-range {
+    accent-color: var(--nt-accent);
+    width: 100%;
+  }
+
+  .chipswap-blend {
+    flex-wrap: wrap;
+  }
+
+  .chipswap-brushes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
+  .chipswap-brush-row {
+    align-items: center;
+    display: inline-flex;
+    gap: 2px;
+  }
+
+  .chipswap-brush-editor {
+    display: grid;
+    gap: var(--nt-gap-2);
+    margin-top: var(--nt-gap-2);
+  }
+
+  .chipswap-brush-grid {
+    display: grid;
+    gap: 2px;
+  }
+
+  .chipswap-brush-cell {
+    background: var(--nt-bg-panel);
+    border: 1px solid var(--nt-line-soft);
+    border-radius: 2px;
+    cursor: pointer;
+    height: 18px;
+    padding: 0;
+    width: 18px;
+  }
+
+  .chipswap-brush-cell--on {
+    background: var(--nt-accent);
+  }
+
+  .chipswap-brush-cell--anchor {
+    border-color: var(--nt-accent);
+    border-width: 2px;
+  }
+
+  /* ---------- collection, store, trades ---------- */
+
+  .chipswap-grid {
+    display: grid;
+    gap: var(--nt-gap-3);
+    grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .chipswap-chip-card,
+  .chipswap-trade-card {
+    align-items: start;
+    display: flex;
+    flex-direction: column;
+    gap: var(--nt-gap-2);
+    min-width: 0;
+  }
+
+  .chipswap-chip-meta,
+  .chipswap-trade-meta {
+    display: grid;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .chipswap-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--nt-gap-2);
+    margin-bottom: var(--nt-gap-3);
+  }
+
+  .chipswap-offer {
+    display: grid;
+    gap: var(--nt-gap-2);
+    margin-top: var(--nt-gap-3);
+  }
+
+  .chipswap-offer-list {
+    display: grid;
+    gap: 4px;
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .chipswap-offer-list li {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--nt-gap-2);
+  }
+
+  .chipswap-trades,
+  .chipswap-directory {
+    display: grid;
+    gap: var(--nt-gap-3);
+  }
+
+  .chipswap-trade-list {
+    display: grid;
+    gap: var(--nt-gap-3);
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .chipswap-suggestions {
+    display: grid;
+    gap: var(--nt-gap-2);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .chipswap-suggestions li {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--nt-gap-2);
+  }
+
+  .chipswap-auto-announce {
+    align-items: center;
+    display: flex;
+    flex-direction: row;
+    gap: var(--nt-gap-2);
+    margin-top: var(--nt-gap-2);
+  }
+
+  @container (max-width: 980px) {
+    .chipswap-studio {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .chipswap-tools {
+      max-height: none;
+    }
+  }
+
+  @container (max-width: 520px) {
+    .nt-app.chipswap {
+      padding: var(--nt-pad-3);
+    }
+
+    .chipswap-header {
+      display: grid;
+      grid-template-columns: 1fr;
+    }
+
+    .chipswap-summary {
+      justify-items: start;
+      text-align: left;
+    }
   }
 }

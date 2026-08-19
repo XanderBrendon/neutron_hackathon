@@ -17,6 +17,20 @@ async function readManifest(): Promise<NeutronManifest> {
   return JSON.parse(await readFile(manifestUrl, "utf8")) as NeutronManifest;
 }
 
+// The shared manifest type keeps most sections optional; Chipswap declares them
+// all, so the tests read them through a checked accessor rather than casts.
+function funcMap(manifest: NeutronManifest): Record<string, { type: string; async: unknown; arg?: string[] }> {
+  const map = manifest.func;
+  if (!map) throw new Error("The manifest declares no methods");
+  return map as Record<string, { type: string; async: unknown; arg?: string[] }>;
+}
+
+function routes(manifest: NeutronManifest) {
+  const ingress = manifest.capabilities?.public_ingress;
+  if (!ingress) throw new Error("The manifest declares no public ingress");
+  return ingress.routes;
+}
+
 async function readBackend(): Promise<string> {
   return readFile(backendUrl, "utf8");
 }
@@ -107,8 +121,8 @@ test("chipswap declares the five paid chipswap_v1 routes", async () => {
   });
 
   // Every route handler takes the kernel-supplied caller and nothing else.
-  for (const route of manifest.capabilities!.public_ingress!.routes) {
-    expect(manifest.func[route.handler]).toEqual({
+  for (const route of routes(manifest)) {
+    expect(funcMap(manifest)[route.handler]).toEqual({
       type: "update",
       async: false,
       arg: ["caller"],
@@ -131,10 +145,8 @@ test("outbound trading is scoped to the chipswap dispatcher alone", async () => 
   });
 
   // The per-call ceiling must cover the most expensive route floor.
-  const floors = manifest.capabilities!.public_ingress!.routes.map(
-    (route) => route.required_cycles ?? 0,
-  );
-  expect(manifest.capabilities!.backend_calls!.max_cycles_per_call).toBeGreaterThanOrEqual(
+  const floors = routes(manifest).map((route) => route.required_cycles ?? 0);
+  expect(manifest.capabilities?.backend_calls?.max_cycles_per_call).toBeGreaterThanOrEqual(
     Math.max(...floors),
   );
 });
@@ -153,22 +165,21 @@ test("chipswap depends on Contacts for designer discovery", async () => {
 
 test("every owner-facing method is preapproved and no route handler is", async () => {
   const manifest = await readManifest();
-  const preapproved = manifest.capabilities!.preapproved_self_calls!.methods;
-  const handlers = new Set(
-    manifest.capabilities!.public_ingress!.routes.map((route) => route.handler),
-  );
+  const preapproved = manifest.capabilities?.preapproved_self_calls?.methods ?? [];
+  const handlers = new Set(routes(manifest).map((route) => route.handler));
 
   expect(preapproved.length).toBeGreaterThan(0);
   expect(new Set(preapproved).size).toBe(preapproved.length);
 
   for (const method of preapproved) {
-    expect(manifest.func[method]).toBeDefined();
-    expect(["query", "update"]).toContain(manifest.func[method].type);
+    const entry = funcMap(manifest)[method];
+    expect(entry).toBeDefined();
+    expect(["query", "update"]).toContain(entry?.type ?? "missing");
     expect(handlers.has(method)).toBe(false);
   }
 
   // Nothing owner-facing is left out of the preapproved list by accident.
-  for (const [name, entry] of Object.entries(manifest.func)) {
+  for (const [name, entry] of Object.entries(funcMap(manifest))) {
     if (handlers.has(name)) continue;
     expect(preapproved).toContain(name);
     expect(entry).not.toHaveProperty("allow");
@@ -179,7 +190,7 @@ test("the backend defines every declared method", async () => {
   const manifest = await readManifest();
   const backend = await readBackend();
 
-  for (const name of Object.keys(manifest.func)) {
+  for (const name of Object.keys(funcMap(manifest))) {
     expect(backend).toContain(name);
   }
   // Ordinary apps may not open direct public access.
@@ -191,7 +202,9 @@ test("chipswap emits usable method schemas", async () => {
   const backend = await readBackend();
   const artifact = generateAppMethodSchemaArtifact(manifest, backend);
 
-  expect(Object.keys(artifact.methods).length).toBe(Object.keys(manifest.func).length);
+  expect(Object.keys(artifact.methods).length).toBe(
+    Object.keys(funcMap(manifest)).length,
+  );
   expect(artifact.methods.chipswap_draft_create).toMatchObject({ type: "update" });
   expect(artifact.methods.chipswap_status).toMatchObject({ type: "query" });
 
