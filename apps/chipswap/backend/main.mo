@@ -54,12 +54,15 @@ module {
     };
 
     public type ContactErrorV2 = {
-        #invalid_request;
-        #not_found;
-        #limit_reached;
-        #duplicate;
-        #revision_conflict : { current_revision : Nat };
-        #integrity_error;
+        #validation : Text;
+        #not_found : Nat;
+        #conflict : { expected : Nat; actual : Nat };
+        #neutron_conflict : {
+            principal : Principal;
+            contact_id : Nat;
+            contact_name : Text;
+        };
+        #limit : Text;
     };
 
     public type DiscoverNeutronContactsResultV2 = {
