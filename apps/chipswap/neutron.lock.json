@@ -5,8 +5,8 @@
     "chipswap": {
       "schemas": {
         "1": {
-          "hash": "afd2e0fdd90d3f5f8aac76796830cc6e4864a2dda1b78372ff475abd59dbddf3",
-          "entry": "afd2e0fdd90d3f5f8aac76796830cc6e4864a2dda1b78372ff475abd59dbddf3"
+          "hash": "d0ffed99fd7900c0e35e5d2663b95f9ca46307a4f3ffd18ab4db6d4696b8c266",
+          "entry": "6a2cc7a1bcdb67585eb9eaa79dc5c57d0dd7f81406dbdd29a1ae1bb536bc730b"
         }
       },
       "migrations": {}
