@@ -1,0 +1,538 @@
+import Array "mo:core/Array";
+import Blob "mo:core/Blob";
+import Int "mo:core/Int";
+import List "mo:core/List";
+import Nat8 "mo:core/Nat8";
+import Nat32 "mo:core/Nat32";
+import Principal "mo:core/Principal";
+import Text "mo:core/Text";
+import Shape "./Shape";
+
+// The CSW1 peer reply wire.
+//
+// Handler *inputs* are ordinary Candid: the kernel decodes and rejects malformed
+// payloads before app code runs. Handler *outputs* are a Blob carrying this
+// format, so the calling side can parse a hostile reply with bounded byte
+// arithmetic instead of handing it to `from_candid`, which traps.
+//
+// Every message is magic, type, version, then fixed fields. Integers are
+// big-endian; text, blobs, and arrays are length-prefixed and capped before any
+// allocation; and a decoder rejects trailing bytes so two different byte strings
+// can never mean the same message.
+module {
+    public let MAGIC : [Nat8] = [0x43, 0x53, 0x57, 0x31]; // CSW1
+    public let WIRE_VERSION : Nat8 = 1;
+    public let MAX_MESSAGE_BYTES : Nat = 65_536;
+
+    public let MAX_DESIGNS : Nat = 10;
+    public let MAX_DIRECTORY_SHARE : Nat = 32;
+    public let MAX_TITLE_BYTES : Nat = 192;
+    public let MAX_SHAPE_ID_BYTES : Nat = 32;
+    public let MAX_CODE_BYTES : Nat = 64;
+    public let MAX_PRINCIPAL_BYTES : Nat = 29;
+
+    let TYPE_CATALOG : Nat8 = 1;
+    let TYPE_TRADE : Nat8 = 2;
+    let TYPE_DELIVER : Nat8 = 3;
+    let TYPE_STATUS : Nat8 = 4;
+    let TYPE_ANNOUNCE : Nat8 = 5;
+
+    public type TradeMode = { #auto; #manual };
+
+    public type Art = {
+        shape_id : Text;
+        palette : [Nat32];
+        pixels : Blob;
+    };
+
+    public type Chip = {
+        designer : Principal;
+        design_id : Nat;
+        serial : Nat;
+        title : Text;
+        art : Art;
+        design_revision : Nat;
+        minted_at_ns : Int;
+    };
+
+    public type Design = {
+        design_id : Nat;
+        title : Text;
+        art : Art;
+        trade_mode : TradeMode;
+        design_revision : Nat;
+        published_at_ns : Int;
+    };
+
+    public type CatalogReply = {
+        designs : [Design];
+        directory : [Principal];
+    };
+
+    public type TradeReply = {
+        #minted : { chip : Chip; directory : [Principal] };
+        #pending : { directory : [Principal] };
+        #declined : { reason : Text; directory : [Principal] };
+        #err : { code : Text };
+    };
+
+    public type DeliverReply = {
+        #ok;
+        #err : { code : Text };
+    };
+
+    public type StatusReply = {
+        #unknown;
+        #pending;
+        #minted : { chip : Chip };
+        #declined : { reason : Text };
+    };
+
+    public type AnnounceReply = {
+        #ok : { directory : [Principal] };
+        #err : { code : Text };
+    };
+
+    // --- Encoding ----------------------------------------------------------
+
+    public func encodeCatalogReply(reply : CatalogReply) : Blob {
+        let bytes = header(TYPE_CATALOG);
+        let designs = capped<Design>(reply.designs, MAX_DESIGNS);
+        appendU16(bytes, designs.size());
+        for (design in designs.values()) appendDesign(bytes, design);
+        appendDirectory(bytes, reply.directory);
+        finish(bytes);
+    };
+
+    public func encodeTradeReply(reply : TradeReply) : Blob {
+        let bytes = header(TYPE_TRADE);
+        switch (reply) {
+            case (#minted(payload)) {
+                List.add(bytes, 0 : Nat8);
+                appendChip(bytes, payload.chip);
+                appendDirectory(bytes, payload.directory);
+            };
+            case (#pending(payload)) {
+                List.add(bytes, 1 : Nat8);
+                appendDirectory(bytes, payload.directory);
+            };
+            case (#declined(payload)) {
+                List.add(bytes, 2 : Nat8);
+                appendText(bytes, payload.reason, MAX_CODE_BYTES);
+                appendDirectory(bytes, payload.directory);
+            };
+            case (#err(payload)) {
+                List.add(bytes, 3 : Nat8);
+                appendText(bytes, payload.code, MAX_CODE_BYTES);
+            };
+        };
+        finish(bytes);
+    };
+
+    public func encodeDeliverReply(reply : DeliverReply) : Blob {
+        let bytes = header(TYPE_DELIVER);
+        switch (reply) {
+            case (#ok) List.add(bytes, 0 : Nat8);
+            case (#err(payload)) {
+                List.add(bytes, 1 : Nat8);
+                appendText(bytes, payload.code, MAX_CODE_BYTES);
+            };
+        };
+        finish(bytes);
+    };
+
+    public func encodeStatusReply(reply : StatusReply) : Blob {
+        let bytes = header(TYPE_STATUS);
+        switch (reply) {
+            case (#unknown) List.add(bytes, 0 : Nat8);
+            case (#pending) List.add(bytes, 1 : Nat8);
+            case (#minted(payload)) {
+                List.add(bytes, 2 : Nat8);
+                appendChip(bytes, payload.chip);
+            };
+            case (#declined(payload)) {
+                List.add(bytes, 3 : Nat8);
+                appendText(bytes, payload.reason, MAX_CODE_BYTES);
+            };
+        };
+        finish(bytes);
+    };
+
+    public func encodeAnnounceReply(reply : AnnounceReply) : Blob {
+        let bytes = header(TYPE_ANNOUNCE);
+        switch (reply) {
+            case (#ok(payload)) {
+                List.add(bytes, 0 : Nat8);
+                appendDirectory(bytes, payload.directory);
+            };
+            case (#err(payload)) {
+                List.add(bytes, 1 : Nat8);
+                appendText(bytes, payload.code, MAX_CODE_BYTES);
+            };
+        };
+        finish(bytes);
+    };
+
+    // --- Decoding ----------------------------------------------------------
+
+    public func decodeCatalogReply(message : Blob) : ?CatalogReply {
+        let ?reader = open(message, TYPE_CATALOG) else return null;
+        let count = reader.u16();
+        if (count > MAX_DESIGNS) return null;
+        let designs = List.empty<Design>();
+        var index = 0;
+        while (index < count and reader.ok()) {
+            switch (readDesign(reader)) {
+                case (?design) List.add(designs, design);
+                case null return null;
+            };
+            index += 1;
+        };
+        let directory = readDirectory(reader);
+        if (not reader.done()) return null;
+        ?{ designs = List.toArray(designs); directory };
+    };
+
+    public func decodeTradeReply(message : Blob) : ?TradeReply {
+        let ?reader = open(message, TYPE_TRADE) else return null;
+        let variant = reader.u8();
+        let reply : TradeReply = switch (variant) {
+            case (0) {
+                let ?chip = readChip(reader) else return null;
+                { chip; directory = readDirectory(reader) } |> #minted(_);
+            };
+            case (1) #pending({ directory = readDirectory(reader) });
+            case (2) {
+                let reason = reader.text(MAX_CODE_BYTES);
+                #declined({ reason; directory = readDirectory(reader) });
+            };
+            case (3) #err({ code = reader.text(MAX_CODE_BYTES) });
+            case (_) return null;
+        };
+        if (not reader.done()) return null;
+        ?reply;
+    };
+
+    public func decodeDeliverReply(message : Blob) : ?DeliverReply {
+        let ?reader = open(message, TYPE_DELIVER) else return null;
+        let reply : DeliverReply = switch (reader.u8()) {
+            case (0) #ok;
+            case (1) #err({ code = reader.text(MAX_CODE_BYTES) });
+            case (_) return null;
+        };
+        if (not reader.done()) return null;
+        ?reply;
+    };
+
+    public func decodeStatusReply(message : Blob) : ?StatusReply {
+        let ?reader = open(message, TYPE_STATUS) else return null;
+        let reply : StatusReply = switch (reader.u8()) {
+            case (0) #unknown;
+            case (1) #pending;
+            case (2) {
+                let ?chip = readChip(reader) else return null;
+                #minted({ chip });
+            };
+            case (3) #declined({ reason = reader.text(MAX_CODE_BYTES) });
+            case (_) return null;
+        };
+        if (not reader.done()) return null;
+        ?reply;
+    };
+
+    public func decodeAnnounceReply(message : Blob) : ?AnnounceReply {
+        let ?reader = open(message, TYPE_ANNOUNCE) else return null;
+        let reply : AnnounceReply = switch (reader.u8()) {
+            case (0) #ok({ directory = readDirectory(reader) });
+            case (1) #err({ code = reader.text(MAX_CODE_BYTES) });
+            case (_) return null;
+        };
+        if (not reader.done()) return null;
+        ?reply;
+    };
+
+    // --- Writers -----------------------------------------------------------
+
+    func header(messageType : Nat8) : List.List<Nat8> {
+        let bytes = List.empty<Nat8>();
+        for (byte in MAGIC.values()) List.add(bytes, byte);
+        List.add(bytes, messageType);
+        List.add(bytes, WIRE_VERSION);
+        bytes;
+    };
+
+    func finish(bytes : List.List<Nat8>) : Blob {
+        Blob.fromArray(List.toArray(bytes));
+    };
+
+    func capped<T>(values : [T], limit : Nat) : [T] {
+        if (values.size() <= limit) values else Array.tabulate<T>(limit, func(i) { values[i] });
+    };
+
+    func appendU8(bytes : List.List<Nat8>, value : Nat) {
+        List.add(bytes, Nat8.fromNat(value % 256));
+    };
+
+    func appendU16(bytes : List.List<Nat8>, value : Nat) {
+        appendU8(bytes, value / 256);
+        appendU8(bytes, value);
+    };
+
+    func appendU32(bytes : List.List<Nat8>, value : Nat) {
+        appendU16(bytes, value / 65_536);
+        appendU16(bytes, value);
+    };
+
+    func appendU64(bytes : List.List<Nat8>, value : Nat) {
+        appendU32(bytes, value / 4_294_967_296);
+        appendU32(bytes, value);
+    };
+
+    // Our timestamps come from Time.now() and are never negative; a negative
+    // would be a local clock fault, and it travels as zero rather than wrapping
+    // into an enormous positive value.
+    func appendTimestamp(bytes : List.List<Nat8>, value : Int) {
+        appendU64(bytes, if (value <= 0) 0 else Int.abs(value));
+    };
+
+    func appendText(bytes : List.List<Nat8>, value : Text, limit : Nat) {
+        let encoded = Blob.toArray(Text.encodeUtf8(value));
+        let length = if (encoded.size() <= limit) encoded.size() else limit;
+        appendU16(bytes, length);
+        var index = 0;
+        while (index < length) {
+            List.add(bytes, encoded[index]);
+            index += 1;
+        };
+    };
+
+    func appendBlob(bytes : List.List<Nat8>, value : Blob) {
+        appendU16(bytes, value.size());
+        for (byte in value.values()) List.add(bytes, byte);
+    };
+
+    func appendPrincipal(bytes : List.List<Nat8>, value : Principal) {
+        let raw = Principal.toBlob(value);
+        let length = if (raw.size() <= MAX_PRINCIPAL_BYTES) raw.size() else 0;
+        appendU8(bytes, length);
+        if (length > 0) for (byte in raw.values()) List.add(bytes, byte);
+    };
+
+    func appendDirectory(bytes : List.List<Nat8>, entries : [Principal]) {
+        let sample = capped<Principal>(entries, MAX_DIRECTORY_SHARE);
+        appendU16(bytes, sample.size());
+        for (entry in sample.values()) appendPrincipal(bytes, entry);
+    };
+
+    func appendArt(bytes : List.List<Nat8>, art : Art) {
+        appendText(bytes, art.shape_id, MAX_SHAPE_ID_BYTES);
+        let palette = capped<Nat32>(art.palette, Shape.MAX_PALETTE);
+        appendU16(bytes, palette.size());
+        for (colour in palette.values()) appendU32(bytes, Nat32.toNat(colour));
+        appendBlob(bytes, art.pixels);
+    };
+
+    func appendChip(bytes : List.List<Nat8>, chip : Chip) {
+        appendPrincipal(bytes, chip.designer);
+        appendU16(bytes, chip.design_id);
+        appendU64(bytes, chip.serial);
+        appendText(bytes, chip.title, MAX_TITLE_BYTES);
+        appendArt(bytes, chip.art);
+        appendU64(bytes, chip.design_revision);
+        appendTimestamp(bytes, chip.minted_at_ns);
+    };
+
+    func appendDesign(bytes : List.List<Nat8>, design : Design) {
+        appendU16(bytes, design.design_id);
+        appendText(bytes, design.title, MAX_TITLE_BYTES);
+        appendArt(bytes, design.art);
+        List.add(bytes, switch (design.trade_mode) { case (#auto)(0 : Nat8); case (#manual)(1 : Nat8) });
+        appendU64(bytes, design.design_revision);
+        appendTimestamp(bytes, design.published_at_ns);
+    };
+
+    // --- Reader ------------------------------------------------------------
+
+    // Every read is bounds-checked. A failed read latches `failed`, so a caller
+    // may read a whole message and check validity once, and a length that was
+    // never really read is zero rather than attacker-chosen.
+    class Reader(bytes : [Nat8]) {
+        var offset = 0;
+        var failed = false;
+
+        public func ok() : Bool = not failed;
+
+        public func done() : Bool = not failed and offset == bytes.size();
+
+        public func fail() { failed := true };
+
+        public func u8() : Nat {
+            if (failed or offset >= bytes.size()) {
+                failed := true;
+                return 0;
+            };
+            let value = Nat8.toNat(bytes[offset]);
+            offset += 1;
+            value;
+        };
+
+        public func u16() : Nat {
+            let high = u8();
+            let low = u8();
+            high * 256 + low;
+        };
+
+        public func u32() : Nat {
+            let high = u16();
+            let low = u16();
+            high * 65_536 + low;
+        };
+
+        public func u64() : Nat {
+            let high = u32();
+            let low = u32();
+            high * 4_294_967_296 + low;
+        };
+
+        public func raw(length : Nat) : [Nat8] {
+            if (failed or length > bytes.size() or offset > bytes.size() - length) {
+                failed := true;
+                return [];
+            };
+            let start = offset;
+            offset += length;
+            Array.tabulate<Nat8>(length, func(i) { bytes[start + i] });
+        };
+
+        public func text(limit : Nat) : Text {
+            let length = u16();
+            if (length > limit) {
+                failed := true;
+                return "";
+            };
+            let raw_bytes = raw(length);
+            if (failed) return "";
+            switch (Text.decodeUtf8(Blob.fromArray(raw_bytes))) {
+                case (?value) value;
+                case null {
+                    failed := true;
+                    "";
+                };
+            };
+        };
+
+        public func blob(limit : Nat) : Blob {
+            let length = u16();
+            if (length > limit) {
+                failed := true;
+                return "" : Blob;
+            };
+            Blob.fromArray(raw(length));
+        };
+
+        public func principal() : Principal {
+            let length = u8();
+            if (length == 0 or length > MAX_PRINCIPAL_BYTES) {
+                failed := true;
+                return Principal.fromBlob(Blob.fromArray([]));
+            };
+            Principal.fromBlob(Blob.fromArray(raw(length)));
+        };
+    };
+
+    func open(message : Blob, expected : Nat8) : ?Reader {
+        if (message.size() < MAGIC.size() + 2) return null;
+        if (message.size() > MAX_MESSAGE_BYTES) return null;
+        let bytes = Blob.toArray(message);
+        var index = 0;
+        while (index < MAGIC.size()) {
+            if (bytes[index] != MAGIC[index]) return null;
+            index += 1;
+        };
+        if (bytes[MAGIC.size()] != expected) return null;
+        if (bytes[MAGIC.size() + 1] != WIRE_VERSION) return null;
+        let reader = Reader(bytes);
+        ignore reader.raw(MAGIC.size() + 2);
+        ?reader;
+    };
+
+    func readDirectory(reader : Reader) : [Principal] {
+        let count = reader.u16();
+        if (count > MAX_DIRECTORY_SHARE) {
+            reader.fail();
+            return [];
+        };
+        let entries = List.empty<Principal>();
+        var index = 0;
+        while (index < count and reader.ok()) {
+            List.add(entries, reader.principal());
+            index += 1;
+        };
+        if (not reader.ok()) return [];
+        List.toArray(entries);
+    };
+
+    func readArt(reader : Reader) : ?Art {
+        let shapeId = reader.text(MAX_SHAPE_ID_BYTES);
+        let paletteSize = reader.u16();
+        if (not reader.ok() or paletteSize == 0 or paletteSize > Shape.MAX_PALETTE) return null;
+        let palette = Array.tabulate<Nat32>(
+            paletteSize,
+            func(_) { Nat32.fromNat(reader.u32() % 4_294_967_296) },
+        );
+        let pixels = reader.blob(Shape.PIXEL_COUNT);
+        if (not reader.ok()) return null;
+        // Art that does not describe a chip we can render is refused here, not
+        // repaired later.
+        switch (Shape.validateArt(shapeId, paletteSize, pixels)) {
+            case (?_code) return null;
+            case null {};
+        };
+        ?{ shape_id = shapeId; palette; pixels };
+    };
+
+    func readChip(reader : Reader) : ?Chip {
+        let designer = reader.principal();
+        let designId = reader.u16();
+        let serial = reader.u64();
+        let title = reader.text(MAX_TITLE_BYTES);
+        if (not reader.ok()) return null;
+        let ?art = readArt(reader) else return null;
+        let designRevision = reader.u64();
+        let mintedAt = reader.u64();
+        if (not reader.ok()) return null;
+        ?{
+            designer;
+            design_id = designId;
+            serial;
+            title;
+            art;
+            design_revision = designRevision;
+            minted_at_ns = mintedAt;
+        };
+    };
+
+    func readDesign(reader : Reader) : ?Design {
+        let designId = reader.u16();
+        let title = reader.text(MAX_TITLE_BYTES);
+        if (not reader.ok()) return null;
+        let ?art = readArt(reader) else return null;
+        let mode = reader.u8();
+        let designRevision = reader.u64();
+        let publishedAt = reader.u64();
+        if (not reader.ok()) return null;
+        let tradeMode : TradeMode = switch (mode) {
+            case (0) #auto;
+            case (1) #manual;
+            case (_) return null;
+        };
+        ?{
+            design_id = designId;
+            title;
+            art;
+            trade_mode = tradeMode;
+            design_revision = designRevision;
+            published_at_ns = publishedAt;
+        };
+    };
+}

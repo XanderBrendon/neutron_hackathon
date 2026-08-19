@@ -13,7 +13,7 @@
     "validate": "bun ../../packages/neutron-scripts/src/validate.ts",
     "package": "npm run validate && npm run build && npm run mopack && npm run schema && npm run package:metadata && bun ../../packages/neutron-scripts/src/pack.ts",
     "watch": "bun build.ts watch",
-    "test:motoko": "bun ../../packages/neutron-scripts/src/run_motoko_program.ts test/shape.test.mo test/memory.test.mo test/designs.test.mo test/holdings.test.mo test/directory.test.mo",
+    "test:motoko": "bun ../../packages/neutron-scripts/src/run_motoko_program.ts test/shape.test.mo test/memory.test.mo test/designs.test.mo test/holdings.test.mo test/directory.test.mo test/wire.test.mo",
     "test": "npm run package && bun test && npm run test:motoko",
     "test:motoko:wasi": "bun scripts/run_motoko_wasi.ts"
   },
