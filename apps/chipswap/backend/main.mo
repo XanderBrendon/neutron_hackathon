@@ -388,6 +388,9 @@ module {
 
     let CANDID_SLACK : Nat = 64;
     let MAX_FETCH_TARGETS : Nat = 8;
+    // Auto-announce rides on a refresh the owner asked for, and is bounded so
+    // one refresh cannot fan out into an unbounded number of paid calls.
+    let MAX_AUTO_ANNOUNCE : Nat = 4;
     let MAX_BRUSH_CELLS : Nat = 49;
     let MAX_BRUSHES : Nat = 16;
     let MAX_BRUSH_NAME_CHARS : Nat = 24;
@@ -903,6 +906,7 @@ module {
 
             let fetched = List.empty<Text>();
             let failed = List.empty<Text>();
+            let discovered = List.empty<Principal>();
             let ordered = List.toArray(targets);
             var index = 0;
             while (index < ordered.size()) {
@@ -928,7 +932,9 @@ module {
                             ),
                             now,
                         );
-                        ignore Directory.merge(mem, catalog.directory, self, now);
+                        for (learned in Directory.mergeReturningNew(mem, catalog.directory, self, now).values()) {
+                            List.add(discovered, learned);
+                        };
                         List.add(fetched, Principal.toText(target));
                     };
                     case null List.add(failed, Principal.toText(target));
@@ -936,11 +942,77 @@ module {
                 index += 1;
             };
             bump();
+
+            if (mem.settings.auto_announce and List.size(discovered) > 0) {
+                await* announceToNew(List.toArray(discovered));
+            };
+
             #ok({
                 fetched = List.toArray(fetched);
                 failed = List.toArray(failed);
                 revision = mem.revision;
             });
+        };
+
+        // Publishes this Neutron into the directories of peers we just learned
+        // about, when the owner has asked for that to happen automatically.
+        func announceToNew(candidates : [Principal]) : async* () {
+            let now = Time.now();
+            let payload : PeerAnnounceRequest = {
+                directory = Directory.share(mem, self, Directory.MAX_SHARE);
+            };
+            let request : NeutronCapabilities.PublicIngressRequestV1 = {
+                method = ROUTE_ANNOUNCE;
+                payload = to_candid (payload);
+            };
+            let targets = List.empty<Principal>();
+            for (candidate in candidates.values()) {
+                if (List.size(targets) < MAX_AUTO_ANNOUNCE) {
+                    switch (Directory.get(mem, candidate)) {
+                        case (?entry) if (not entry.announced) List.add(targets, candidate);
+                        case null {};
+                    };
+                };
+            };
+            if (List.size(targets) == 0) return;
+            let ordered = List.toArray(targets);
+            let results = await* calls.call_batch(
+                Array.map<Principal, NeutronCapabilities.BackendCallRequestV1>(
+                    ordered,
+                    func(target) {
+                        {
+                            canister = target;
+                            method = INGRESS_METHOD;
+                            args = to_candid (request);
+                            cycles = ANNOUNCE_CYCLES;
+                        };
+                    },
+                )
+            );
+            var index = 0;
+            while (index < ordered.size()) {
+                if (index < results.size()) {
+                    switch (results[index]) {
+                        case (#ok(reply)) {
+                            switch (unwrapReply(reply, 4_096)) {
+                                case (?bytes) {
+                                    switch (Wire.decodeAnnounceReply(bytes)) {
+                                        case (?#ok(answer)) {
+                                            Directory.markAnnounced(mem, ordered[index], now);
+                                            ignore Directory.merge(mem, answer.directory, self, now);
+                                        };
+                                        case (_) {};
+                                    };
+                                };
+                                case null {};
+                            };
+                        };
+                        case (#err(_)) {};
+                    };
+                };
+                index += 1;
+            };
+            bump();
         };
 
         public func /*update*/chipswap_trade_propose(

@@ -4,7 +4,6 @@ import {
   createDraft,
   deleteDraft,
   deleteBrush,
-  errorCode,
   errorMessage,
   loadBrushes,
   loadDesigns,
@@ -32,6 +31,7 @@ import {
   applyGenerator,
   canRemovePaletteColor,
   createEditorState,
+  endStroke,
   lockAllOfColor,
   markSaved,
   paint,
@@ -133,15 +133,24 @@ export const Studio = ({ status, onChanged }: Props) => {
   );
   const brush = brushes.find((candidate) => candidate.id === brushId) ?? PRESET_BRUSHES[0]!;
 
-  const handlePaint = (x: number, y: number) => {
+  // A drag is one edit: the first cell opens the stroke and the rest extend it,
+  // so undo steps back over the whole line rather than one pixel at a time.
+  const handlePaint = (x: number, y: number, phase: "start" | "move" | "end") => {
     if (!editor || !editable) return;
+    if (phase === "end") {
+      setEditor((current) => (current ? endStroke(current) : current));
+      return;
+    }
     const indices = stamp(brush, x, y);
     if (indices.length === 0) return;
     setPreview(null);
+    const stroke = phase === "start" ? "begin" : "extend";
     setEditor((current) => {
       if (!current) return current;
-      if (tool === "paint") return paint(current, indices, current.activeColor);
-      return paintLocks(current, indices, tool === "lock");
+      if (tool === "paint") {
+        return paint(current, indices, current.activeColor, stroke);
+      }
+      return paintLocks(current, indices, tool === "lock", stroke);
     });
   };
 

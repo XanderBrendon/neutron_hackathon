@@ -81,16 +81,27 @@ module {
         self : Principal,
         now : Int,
     ) : Nat {
-        var added = 0;
+        mergeReturningNew(mem, entries, self, now).size();
+    };
+
+    // The principals this exchange taught us about, for the caller that offers
+    // to announce itself to them.
+    public func mergeReturningNew(
+        mem : Memory.Mem,
+        entries : [Principal],
+        self : Principal,
+        now : Int,
+    ) : [Principal] {
+        let added = List.empty<Principal>();
         var considered = 0;
         for (candidate in entries.values()) {
-            if (considered >= MAX_SHARE) return added;
+            if (considered >= MAX_SHARE) return List.toArray(added);
             if (not Principal.equal(candidate, self)) {
                 considered += 1;
-                if (note(mem, candidate, #exchange, now)) added += 1;
+                if (note(mem, candidate, #exchange, now)) List.add(added, candidate);
             };
         };
-        added;
+        List.toArray(added);
     };
 
     public func markAnnounced(mem : Memory.Mem, canister : Principal, now : Int) : () {

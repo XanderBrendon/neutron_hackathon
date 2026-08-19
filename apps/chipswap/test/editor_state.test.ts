@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import { PIXEL_COUNT, pixelIndexAt } from "../src/chip.ts";
 import {
   addPaletteColor,
+  endStroke,
   applyGenerator,
   canRemovePaletteColor,
   createEditorState,
@@ -114,6 +115,27 @@ test("undo and redo walk the paint history", () => {
   // Painting after an undo drops the redo branch.
   const branched = paint(undo(state), [A], 2);
   expect(branched.canRedo).toBe(false);
+});
+
+test("a drag undoes as one stroke", () => {
+  let state = fresh();
+  state = paint(state, [A], 1, "begin");
+  state = paint(state, [B], 1, "extend");
+  state = paint(state, [C], 1, "extend");
+  state = endStroke(state);
+
+  expect(state.pixels[A]).toBe(1);
+  expect(state.pixels[C]).toBe(1);
+
+  // One undo clears the whole stroke, not just its last pixel.
+  const undone = undo(state);
+  expect([...undone.pixels].every((pixel) => pixel === 0)).toBe(true);
+  expect(undone.canUndo).toBe(false);
+
+  // A second drag is a separate entry.
+  let second = paint(state, [A], 2, "begin");
+  second = endStroke(second);
+  expect(undo(second).pixels[A]).toBe(1);
 });
 
 test("locks are part of the undo history", () => {

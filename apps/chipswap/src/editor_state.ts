@@ -23,6 +23,8 @@ export type EditorState = Snapshot & {
   canUndo: boolean;
   canRedo: boolean;
   dirty: boolean;
+  /** True while a drag is in progress, so the whole stroke undoes as one step. */
+  strokeOpen: boolean;
 };
 
 export type EditorSeed = {
@@ -38,17 +40,27 @@ function snapshot(state: Snapshot): Snapshot {
   };
 }
 
-function withHistory(state: EditorState, next: Snapshot): EditorState {
-  const past = [...state.past, snapshot(state)].slice(-MAX_HISTORY);
+function withHistory(
+  state: EditorState,
+  next: Snapshot,
+  stroke: "none" | "begin" | "extend" = "none",
+): EditorState {
+  // Extending an open stroke updates the artwork without adding a second undo
+  // entry, so dragging across forty pixels is one edit rather than forty.
+  const past =
+    stroke === "extend" && state.strokeOpen
+      ? state.past
+      : [...state.past, snapshot(state)].slice(-MAX_HISTORY);
   return {
     ...state,
     ...next,
     past,
     // A new edit abandons the redo branch, as every editor does.
     future: [],
-    canUndo: true,
+    canUndo: past.length > 0,
     canRedo: false,
     dirty: true,
+    strokeOpen: stroke !== "none",
     activeColor: Math.min(state.activeColor, next.palette.length - 1),
   };
 }
@@ -68,6 +80,7 @@ export function createEditorState(seed: EditorSeed): EditorState {
     canUndo: false,
     canRedo: false,
     dirty: false,
+    strokeOpen: false,
   };
 }
 
@@ -80,6 +93,7 @@ export function paint(
   state: EditorState,
   indices: number[],
   colorIndex: number,
+  stroke: "none" | "begin" | "extend" = "none",
 ): EditorState {
   if (colorIndex < 0 || colorIndex >= state.palette.length) {
     throw new Error(`Colour ${colorIndex} is not in the palette`);
@@ -94,13 +108,18 @@ export function paint(
     changed = true;
   }
   if (!changed) return state;
-  return withHistory(state, { pixels, locks: state.locks, palette: state.palette });
+  return withHistory(
+    state,
+    { pixels, locks: state.locks, palette: state.palette },
+    stroke,
+  );
 }
 
 export function paintLocks(
   state: EditorState,
   indices: number[],
   locked: boolean,
+  stroke: "none" | "begin" | "extend" = "none",
 ): EditorState {
   const locks = Uint8Array.from(state.locks);
   const value = locked ? 1 : 0;
@@ -112,7 +131,16 @@ export function paintLocks(
     changed = true;
   }
   if (!changed) return state;
-  return withHistory(state, { pixels: state.pixels, locks, palette: state.palette });
+  return withHistory(
+    state,
+    { pixels: state.pixels, locks, palette: state.palette },
+    stroke,
+  );
+}
+
+/** Ends the current drag so the next edit starts a fresh undo entry. */
+export function endStroke(state: EditorState): EditorState {
+  return state.strokeOpen ? { ...state, strokeOpen: false } : state;
 }
 
 export function lockAllOfColor(state: EditorState, colorIndex: number): EditorState {
@@ -211,6 +239,7 @@ export function undo(state: EditorState): EditorState {
     canUndo: past.length > 0,
     canRedo: true,
     dirty: true,
+    strokeOpen: false,
     activeColor: Math.min(state.activeColor, previous.palette.length - 1),
   };
 }
@@ -227,6 +256,7 @@ export function redo(state: EditorState): EditorState {
     canUndo: true,
     canRedo: rest.length > 0,
     dirty: true,
+    strokeOpen: false,
     activeColor: Math.min(state.activeColor, next.palette.length - 1),
   };
 }
