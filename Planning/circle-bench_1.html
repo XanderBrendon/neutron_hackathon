@@ -1,0 +1,774 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Raster bench — pixel circles</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=Martian+Mono:wght@400;600;700&display=swap" rel="stylesheet">
+<style>
+:root{
+  --ground:#D9E0E2;
+  --panel:#F8FAFA;
+  --panel-2:#EDF2F2;
+  --ink:#0E1C22;
+  --ink-soft:#5B6E73;
+  --ink-faint:#8FA0A4;
+  --rule:#BDCACC;
+  --accent:#1B3BE8;
+  --flag:#D62F6A;
+  --sans:"Archivo",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --mono:"Martian Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+}
+*{box-sizing:border-box}
+html,body{margin:0}
+body{
+  background:var(--ground);
+  color:var(--ink);
+  font-family:var(--sans);
+  font-size:15px;
+  line-height:1.55;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{width:100%;padding:22px clamp(14px,2vw,28px) 72px}
+
+.eyebrow{
+  font-family:var(--mono);
+  font-size:10px;
+  font-weight:600;
+  letter-spacing:.16em;
+  text-transform:uppercase;
+  color:var(--ink-faint);
+  margin:0 0 6px;
+}
+h1{
+  font-family:var(--mono);
+  font-size:clamp(20px,3.2vw,30px);
+  font-weight:700;
+  letter-spacing:-.02em;
+  line-height:1.15;
+  margin:0 0 8px;
+}
+.lede{max-width:62ch;margin:0 0 26px;color:var(--ink-soft)}
+
+/* ---------- controls ---------- */
+.controls{
+  background:var(--panel);
+  border:1px solid var(--rule);
+  border-radius:2px;
+  padding:16px 18px;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(160px,1fr));
+  gap:14px 20px;
+  margin-bottom:26px;
+}
+.field{display:flex;flex-direction:column;gap:5px;min-width:0}
+.field > label{
+  font-family:var(--mono);
+  font-size:9.5px;
+  font-weight:600;
+  letter-spacing:.14em;
+  text-transform:uppercase;
+  color:var(--ink-faint);
+}
+.field input[type=number],.field select{
+  font-family:var(--mono);
+  font-size:13px;
+  color:var(--ink);
+  background:#fff;
+  border:1px solid var(--rule);
+  border-radius:2px;
+  padding:6px 8px;
+  width:100%;
+}
+.field input[type=range]{width:100%;accent-color:var(--accent)}
+.row-inline{display:flex;gap:8px;align-items:center}
+.row-inline input[type=number]{width:88px}
+.checks{display:flex;flex-wrap:wrap;gap:6px 16px;align-items:center}
+.check{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink-soft);cursor:pointer;user-select:none}
+.check input{accent-color:var(--accent);margin:0}
+:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* ---------- detail ---------- */
+.stage{
+  position:relative;
+  background:var(--panel-2);
+  border:1px solid var(--rule);
+  border-radius:2px;
+  padding:14px;
+  display:grid;
+  place-content:center;
+  overflow:hidden;
+  margin-bottom:14px;
+}
+.stage-inner{position:relative;line-height:0}
+.stage canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+.stage canvas.overlay{position:absolute;inset:0;image-rendering:auto}
+
+.readout{
+  background:var(--panel);
+  border:1px solid var(--rule);
+  border-radius:2px;
+  padding:20px 22px;
+  margin-bottom:32px;
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(270px,1fr));
+  gap:24px 34px;
+  align-items:start;
+}
+.readout > section{min-width:0}
+.readout dl{display:grid;grid-template-columns:auto 1fr;gap:4px 18px;margin:0}
+.readout dt{
+  font-family:var(--mono);font-size:9.5px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);
+  align-self:center;
+}
+.readout dd{margin:0;font-family:var(--mono);font-size:13px}
+.verdict{font-family:var(--mono);font-size:13px;font-weight:600}
+.verdict.clean{color:var(--accent)}
+.verdict.dirty{color:var(--flag)}
+
+.ladder-head{
+  font-family:var(--mono);font-size:9.5px;font-weight:600;
+  letter-spacing:.13em;text-transform:uppercase;color:var(--ink-faint);
+  margin:0 0 8px;
+}
+.ladder{width:100%;height:70px;display:block;margin-bottom:6px}
+.ladder-note{font-size:12.5px;color:var(--ink-soft);margin:0}
+.ladder-note b{color:var(--flag);font-weight:600}
+
+.export{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+button.act{
+  font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em;
+  background:var(--ink);color:var(--panel);
+  border:1px solid var(--ink);border-radius:2px;
+  padding:7px 12px;cursor:pointer;
+}
+button.act.ghost{background:transparent;color:var(--ink)}
+button.act:hover{background:var(--accent);border-color:var(--accent);color:#fff}
+pre.data{
+  font-family:var(--mono);font-size:11px;line-height:1.75;
+  background:var(--panel-2);border:1px solid var(--rule);border-radius:2px;
+  padding:10px 12px;margin:0;max-height:132px;overflow:auto;white-space:pre-wrap;
+  color:var(--ink-soft);
+}
+
+/* ---------- sweep ---------- */
+.sweep-head{display:flex;justify-content:space-between;align-items:baseline;gap:16px;margin-bottom:12px;flex-wrap:wrap}
+h2{font-family:var(--mono);font-size:13px;font-weight:600;letter-spacing:.1em;text-transform:uppercase;margin:0}
+.sweep-note{font-size:13px;color:var(--ink-soft);margin:0}
+.sweep{
+  display:grid;
+  grid-template-columns:repeat(auto-fill,minmax(150px,1fr));
+  gap:12px;
+}
+.card{
+  background:var(--panel);
+  border:1px solid var(--rule);
+  border-radius:2px;
+  padding:12px 12px 10px;
+  cursor:pointer;
+  text-align:left;
+  font:inherit;
+  color:inherit;
+  display:flex;flex-direction:column;gap:8px;align-items:stretch;
+}
+.card:hover{border-color:var(--ink-soft)}
+.card.on{border-color:var(--accent);box-shadow:inset 0 0 0 1px var(--accent)}
+.card .thumb{display:flex;justify-content:center;align-items:center;min-height:90px}
+.card canvas{display:block;image-rendering:pixelated;image-rendering:crisp-edges}
+.card .meta{display:flex;justify-content:space-between;align-items:baseline;gap:8px}
+.card .eps{font-family:var(--mono);font-size:11px;font-weight:600}
+.card .dfc{font-family:var(--mono);font-size:10px;font-weight:600;letter-spacing:.06em}
+.card .dfc.clean{color:var(--accent)}
+.card .dfc.dirty{color:var(--flag)}
+.card .sub{font-family:var(--mono);font-size:9.5px;color:var(--ink-faint);letter-spacing:.04em}
+.badge{
+  font-family:var(--mono);font-size:8.5px;font-weight:700;letter-spacing:.12em;
+  background:var(--accent);color:#fff;padding:2px 5px;border-radius:2px;align-self:flex-start;
+}
+footer{margin-top:44px;padding-top:16px;border-top:1px solid var(--rule);font-size:12.5px;color:var(--ink-faint);max-width:70ch}
+footer code{font-family:var(--mono);font-size:11.5px}
+
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+<p class="eyebrow">Rasterizer bench</p>
+<h1>Pixel circles, one radius nudge at a time</h1>
+<p class="lede">Pick a diameter. The sweep runs every sub-pixel radius offset from &minus;0.5 to +0.5, throws away the ones that produce an identical pixel arrangement, and shows what's left. Fill modes let you see how content lands inside the shape, not just how the edge steps.</p>
+
+<div class="controls">
+  <div class="field">
+    <label for="dia">Diameter (px)</label>
+    <div class="row-inline">
+      <input type="number" id="dia" min="3" max="256" value="64">
+      <input type="range" id="diaR" min="3" max="256" value="64">
+    </div>
+  </div>
+  <div class="field">
+    <label for="mode">Fill mode</label>
+    <select id="mode">
+      <option value="solid">Solid</option>
+      <option value="rings" selected>Concentric rings</option>
+      <option value="spokes">Radial spokes</option>
+      <option value="runs">Row runs</option>
+      <option value="checker">Grid checker</option>
+      <option value="edge">Edge / interior</option>
+      <option value="error">Distance from true edge</option>
+    </select>
+  </div>
+  <div class="field">
+    <label for="bands">Bands / spokes</label>
+    <div class="row-inline">
+      <input type="number" id="bands" min="2" max="32" value="6">
+      <input type="range" id="bandsR" min="2" max="32" value="6">
+    </div>
+  </div>
+  <div class="field">
+    <label for="zoom">Detail zoom (max = fit)</label>
+    <div class="row-inline">
+      <input type="number" id="zoom" min="1" max="48" value="21">
+      <input type="range" id="zoomR" min="1" max="48" value="21">
+    </div>
+  </div>
+  <div class="field" style="grid-column:1/-1">
+    <label>Overlays</label>
+    <div class="checks">
+      <label class="check"><input type="checkbox" id="opt-grid" checked> Pixel grid</label>
+      <label class="check"><input type="checkbox" id="opt-true" checked> True circle outline</label>
+      <label class="check"><input type="checkbox" id="opt-aa"> Coverage antialiasing</label>
+      <label class="check"><input type="checkbox" id="opt-sort"> Sort sweep by smoothness</label>
+    </div>
+  </div>
+</div>
+
+<div class="stage">
+  <div class="stage-inner">
+    <canvas id="big"></canvas>
+    <canvas id="bigOv" class="overlay"></canvas>
+  </div>
+</div>
+
+<div class="readout">
+  <section>
+    <dl>
+      <dt>Radius</dt><dd id="r-radius">—</dd>
+      <dt>Offset</dt><dd id="r-eps">—</dd>
+      <dt>Same for</dt><dd id="r-range">—</dd>
+      <dt>Extent</dt><dd id="r-extent">—</dd>
+      <dt>Cap width</dt><dd id="r-cap">—</dd>
+      <dt>Area</dt><dd id="r-area">—</dd>
+      <dt>Edge fit</dt><dd id="r-fit">—</dd>
+      <dt>Smoothness</dt><dd id="r-defects" class="verdict">—</dd>
+    </dl>
+  </section>
+  <section>
+    <p class="ladder-head">Step profile — half-width gained per row</p>
+    <svg class="ladder" id="ladder" preserveAspectRatio="none" aria-hidden="true"></svg>
+    <p class="ladder-note" id="ladderNote"></p>
+  </section>
+  <section>
+    <div class="export">
+      <button class="act" id="copyBtn" type="button">Copy row widths</button>
+      <button class="act ghost" id="pngBtn" type="button">Download PNG (1:1)</button>
+    </div>
+    <pre class="data" id="dataOut"></pre>
+  </section>
+</div>
+
+<div class="sweep-head">
+  <h2>Distinct arrangements</h2>
+  <p class="sweep-note" id="sweepNote"></p>
+</div>
+<div class="sweep" id="sweep"></div>
+
+<footer>
+  Ranking runs in three passes: shapes that fill the requested diameter beat shapes that don't, then fewer step bumps wins, then closer edge fit breaks the tie. <b>Smoothness</b> counts how many times the step profile goes back <em>up</em> as it descends the quadrant — zero means the arc thins monotonically, which is what reads as round. <b>Edge fit</b> is the RMS distance of every boundary pixel's centre from radius <code>d/2</code>, measured against the nominal circle rather than the offset one so it stays comparable across candidates. The top-ranked result is a starting point, not a verdict — below about 16&nbsp;px there are few enough candidates that your eye beats any formula.
+</footer>
+
+</div>
+
+<script>
+(function(){
+"use strict";
+
+const PALETTE = ["#0E1C22","#1B3BE8","#2E8FA8","#39A96B","#C9A227","#D66A24","#D62F6A","#7A3FC4"];
+const RGB = PALETTE.map(hexToRgb);
+const INK = hexToRgb("#0E1C22");
+const ACC = hexToRgb("#1B3BE8");
+const FLG = hexToRgb("#D62F6A");
+const SOFT = hexToRgb("#9FB0B4");
+
+function hexToRgb(h){
+  return [parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+}
+function mix(a,b,t){
+  return [a[0]+(b[0]-a[0])*t, a[1]+(b[1]-a[1])*t, a[2]+(b[2]-a[2])*t];
+}
+
+/* ---------- geometry ---------- */
+
+function buildMask(d, eps){
+  const c = d/2, r = d/2 + eps, rr = r*r;
+  const m = new Uint8Array(d*d);
+  for(let y=0;y<d;y++){
+    const dy = y+0.5-c, dy2 = dy*dy;
+    for(let x=0;x<d;x++){
+      const dx = x+0.5-c;
+      m[y*d+x] = (dx*dx+dy2 <= rr) ? 1 : 0;
+    }
+  }
+  return m;
+}
+
+// 4x4 supersampled coverage per pixel, for the antialiasing comparison
+function buildCoverage(d, eps){
+  const c = d/2, r = d/2 + eps, rr = r*r;
+  const cov = new Float32Array(d*d);
+  const N = 4, step = 1/N, off = step/2;
+  for(let y=0;y<d;y++){
+    for(let x=0;x<d;x++){
+      let hit = 0;
+      for(let sy=0;sy<N;sy++){
+        const dy = y + off + sy*step - c, dy2 = dy*dy;
+        for(let sx=0;sx<N;sx++){
+          const dx = x + off + sx*step - c;
+          if(dx*dx+dy2 <= rr) hit++;
+        }
+      }
+      cov[y*d+x] = hit/(N*N);
+    }
+  }
+  return cov;
+}
+
+function analyze(d, eps){
+  const m = buildMask(d, eps);
+  const widths = new Array(d);
+  let area = 0, minX = d, maxX = -1, minY = d, maxY = -1;
+  for(let y=0;y<d;y++){
+    let s = 0, first = -1, last = -1;
+    for(let x=0;x<d;x++){
+      if(m[y*d+x]){ s++; if(first<0) first = x; last = x; }
+    }
+    widths[y] = s;
+    area += s;
+    if(s>0){
+      if(y<minY) minY = y;
+      if(y>maxY) maxY = y;
+      if(first<minX) minX = first;
+      if(last>maxX) maxX = last;
+    }
+  }
+
+  // Edge fit: RMS distance of every boundary pixel's centre from the nominal
+  // radius d/2. Independent of the offset that produced it, so it can rank
+  // candidates that tie on step defects.
+  const c = d/2, R = d/2;
+  let sumSq = 0, nEdge = 0;
+  for(let y=0;y<d;y++){
+    for(let x=0;x<d;x++){
+      const i = y*d+x;
+      if(!m[i]) continue;
+      const left  = x>0   ? m[i-1] : 0;
+      const right = x<d-1 ? m[i+1] : 0;
+      const up    = y>0   ? m[i-d] : 0;
+      const down  = y<d-1 ? m[i+d] : 0;
+      if(left && right && up && down) continue;
+      const e = Math.hypot(x+0.5-c, y+0.5-c) - R;
+      sumSq += e*e; nEdge++;
+    }
+  }
+  const rms = Math.sqrt(sumSq/Math.max(1,nEdge));
+
+  const rowsTop = Math.ceil(d/2);
+  const half = [];
+  for(let y=0;y<rowsTop;y++) half.push(widths[y]/2);
+  const steps = [];
+  for(let i=0;i<half.length-1;i++) steps.push(half[i+1]-half[i]);
+  let defects = 0;
+  const flags = new Array(steps.length).fill(false);
+  for(let i=0;i<steps.length-1;i++){
+    if(steps[i] < steps[i+1] - 1e-9){ defects++; flags[i+1] = true; }
+  }
+  const ideal = Math.PI * (d/2) * (d/2);
+  return {
+    d, eps, mask:m, widths, half, steps, flags, defects, area, rms,
+    areaErr: (area-ideal)/ideal*100,
+    capWidth: widths[0] || 0,
+    extentW: maxX<0 ? 0 : maxX-minX+1,
+    extentH: maxY<0 ? 0 : maxY-minY+1,
+    sig: widths.join(",")
+  };
+}
+
+// Sweep eps finely, then collapse runs that give an identical arrangement.
+function sweep(d){
+  const SAMPLES = 201;
+  const groups = [];
+  let cur = null;
+  for(let i=0;i<SAMPLES;i++){
+    const eps = -0.5 + i/(SAMPLES-1);
+    const a = analyze(d, eps);
+    if(cur && cur.sig === a.sig){
+      cur.epsHi = eps;
+    } else {
+      cur = { sig:a.sig, epsLo:eps, epsHi:eps, sample:a };
+      groups.push(cur);
+    }
+  }
+  return groups.map(g => {
+    const mid = (g.epsLo+g.epsHi)/2;
+    const a = analyze(d, mid);
+    a.epsLo = g.epsLo; a.epsHi = g.epsHi;
+    return a;
+  });
+}
+
+/* ---------- painting ---------- */
+
+function rowRunIndex(a){
+  // index that increments each time the row width changes — visualises the steps
+  const idx = new Array(a.d);
+  let k = 0;
+  for(let y=0;y<a.d;y++){
+    if(y>0 && a.widths[y]!==a.widths[y-1]) k++;
+    idx[y] = k;
+  }
+  return idx;
+}
+
+function paint(canvas, a, mode, bands, aa, scale){
+  const d = a.d;
+  canvas.width = d; canvas.height = d;
+  canvas.style.width = (d*scale)+"px";
+  canvas.style.height = (d*scale)+"px";
+  const ctx = canvas.getContext("2d");
+  const img = ctx.createImageData(d, d);
+  const px = img.data;
+  const c = d/2, r = d/2 + a.eps;
+  const cov = aa ? buildCoverage(d, a.eps) : null;
+  const runs = mode==="runs" ? rowRunIndex(a) : null;
+
+  for(let y=0;y<d;y++){
+    const dy = y+0.5-c;
+    for(let x=0;x<d;x++){
+      const i = y*d+x, o = i*4;
+      const alpha = aa ? cov[i] : a.mask[i];
+      if(alpha <= 0){ px[o+3] = 0; continue; }
+      const dx = x+0.5-c;
+      const dist = Math.hypot(dx, dy);
+      let col;
+      switch(mode){
+        case "rings": {
+          const band = Math.min(bands-1, Math.floor(dist / (r/bands)));
+          col = RGB[band % RGB.length];
+          break;
+        }
+        case "spokes": {
+          const ang = (Math.atan2(dy, dx) + Math.PI) / (Math.PI*2);
+          const k = Math.min(bands-1, Math.floor(ang*bands));
+          col = RGB[k % RGB.length];
+          break;
+        }
+        case "runs": {
+          col = RGB[runs[y] % RGB.length];
+          break;
+        }
+        case "checker": {
+          col = ((x+y)&1) ? INK : mix(INK, [255,255,255], 0.62);
+          break;
+        }
+        case "edge": {
+          const left  = x>0     ? a.mask[i-1] : 0;
+          const right = x<d-1   ? a.mask[i+1] : 0;
+          const up    = y>0     ? a.mask[i-d] : 0;
+          const down  = y<d-1   ? a.mask[i+d] : 0;
+          col = (left&&right&&up&&down) ? mix(INK,[255,255,255],0.78) : ACC;
+          break;
+        }
+        case "error": {
+          // how deep inside the true edge this pixel centre sits, 0..1
+          const t = Math.max(0, Math.min(1, (r-dist)/Math.max(1,r*0.35)));
+          col = mix(FLG, mix(ACC,[255,255,255],0.15), t);
+          break;
+        }
+        default: col = INK;
+      }
+      px[o]   = col[0]|0;
+      px[o+1] = col[1]|0;
+      px[o+2] = col[2]|0;
+      px[o+3] = Math.round(alpha*255);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function paintOverlay(canvas, a, scale, showGrid, showTrue){
+  const d = a.d, W = d*scale;
+  canvas.width = W; canvas.height = W;
+  canvas.style.width = W+"px"; canvas.style.height = W+"px";
+  const ctx = canvas.getContext("2d");
+  ctx.clearRect(0,0,W,W);
+  if(showGrid && scale >= 4){
+    ctx.strokeStyle = "rgba(14,28,34,0.13)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    for(let i=0;i<=d;i++){
+      const p = Math.round(i*scale)+0.5;
+      ctx.moveTo(p,0); ctx.lineTo(p,W);
+      ctx.moveTo(0,p); ctx.lineTo(W,p);
+    }
+    ctx.stroke();
+  }
+  if(showTrue){
+    ctx.strokeStyle = "rgba(214,47,106,0.9)";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(W/2, W/2, (d/2 + a.eps)*scale, 0, Math.PI*2);
+    ctx.stroke();
+  }
+}
+
+/* ---------- ladder ---------- */
+
+function drawLadder(svg, a){
+  const steps = a.steps, n = steps.length;
+  if(!n){ svg.innerHTML = ""; return; }
+  const W = 100, H = 100, gap = 0.6;
+  const maxV = Math.max(1, ...steps);
+  const bw = W/n;
+  let out = "";
+  for(let i=0;i<n;i++){
+    const h = (steps[i]/maxV) * (H-4);
+    const x = i*bw;
+    const y = H - h;
+    const fill = a.flags[i] ? "#D62F6A" : (steps[i]===0 ? "#BDCACC" : "#1B3BE8");
+    out += '<rect x="'+(x+gap/2).toFixed(2)+'" y="'+y.toFixed(2)+
+           '" width="'+Math.max(0.4,bw-gap).toFixed(2)+'" height="'+Math.max(0.8,h).toFixed(2)+
+           '" fill="'+fill+'"/>';
+  }
+  svg.setAttribute("viewBox","0 0 "+W+" "+H);
+  svg.innerHTML = out;
+}
+
+/* ---------- app ---------- */
+
+const el = id => document.getElementById(id);
+const dia = el("dia"), diaR = el("diaR");
+const bands = el("bands"), bandsR = el("bandsR");
+const zoom = el("zoom"), zoomR = el("zoomR");
+const modeSel = el("mode");
+const optGrid = el("opt-grid"), optTrue = el("opt-true"), optAA = el("opt-aa"), optSort = el("opt-sort");
+const sweepEl = el("sweep");
+
+let candidates = [];
+let selected = 0;
+let bestIndex = 0;
+let zoomLocked = false;
+
+function fmt(v, p){ return (v>=0?"+":"\u2212") + Math.abs(v).toFixed(p); }
+
+function fullSize(a, d){ return a.extentW === d && a.extentH === d; }
+
+// Largest whole-pixel scale that still fits the stage without clipping or
+// scrolling. Measured from the live element, so it tracks window resizes.
+function fitScale(d){
+  const stage = document.querySelector(".stage");
+  const availW = (stage && stage.clientWidth ? stage.clientWidth : 1000) - 30;
+  const availH = Math.max(240, (window.innerHeight || 900) * 0.82) - 30;
+  return Math.max(1, Math.floor(Math.min(availW, availH) / d));
+}
+
+function rankBetter(a, b, d){
+  const fa = fullSize(a,d), fb = fullSize(b,d);
+  if(fa !== fb) return fa;
+  if(a.defects !== b.defects) return a.defects < b.defects;
+  return a.rms < b.rms;
+}
+
+function rebuild(){
+  const d = clampInt(dia.value, 3, 256, 64);
+  dia.value = d; diaR.value = d;
+  candidates = sweep(d);
+  // Rank: full-size shapes first, then fewest step bumps, then closest edge fit.
+  let best = 0;
+  for(let i=1;i<candidates.length;i++){
+    if(rankBetter(candidates[i], candidates[best], d)) best = i;
+  }
+  bestIndex = best;
+  selected = best;
+  zoomLocked = false;
+  renderSweep();
+  renderDetail();
+}
+
+function clampInt(v, lo, hi, dflt){
+  let n = parseInt(v, 10);
+  if(!isFinite(n)) n = dflt;
+  return Math.max(lo, Math.min(hi, n));
+}
+
+function order(){
+  const idx = candidates.map((a,i)=>i);
+  if(optSort.checked){
+    idx.sort((i,j)=>{
+      const a = candidates[i], b = candidates[j];
+      return a.defects - b.defects || a.rms - b.rms || a.eps - b.eps;
+    });
+  }
+  return idx;
+}
+
+function renderSweep(){
+  const d = candidates[0].d;
+  const scale = Math.max(1, Math.min(8, Math.floor(120/d) || 1));
+  const mode = modeSel.value;
+  const bd = clampInt(bands.value, 2, 32, 6);
+  const aa = optAA.checked;
+
+  sweepEl.innerHTML = "";
+  order().forEach(i => {
+    const a = candidates[i];
+    const card = document.createElement("button");
+    card.type = "button";
+    card.className = "card" + (i===selected ? " on" : "");
+    card.setAttribute("aria-pressed", i===selected ? "true" : "false");
+
+    const thumb = document.createElement("div");
+    thumb.className = "thumb";
+    const cv = document.createElement("canvas");
+    paint(cv, a, mode, bd, aa, scale);
+    thumb.appendChild(cv);
+    card.appendChild(thumb);
+
+    if(i === bestIndex){
+      const b = document.createElement("span");
+      b.className = "badge";
+      b.textContent = "TOP RANKED";
+      card.appendChild(b);
+    }
+
+    const meta = document.createElement("div");
+    meta.className = "meta";
+    const eps = document.createElement("span");
+    eps.className = "eps";
+    eps.textContent = fmt(a.eps, 3);
+    const dfc = document.createElement("span");
+    dfc.className = "dfc " + (a.defects===0 ? "clean" : "dirty");
+    dfc.textContent = a.defects===0 ? "clean" : a.defects + " bump" + (a.defects>1?"s":"");
+    meta.appendChild(eps); meta.appendChild(dfc);
+    card.appendChild(meta);
+
+    const sub = document.createElement("span");
+    sub.className = "sub";
+    sub.textContent = a.extentW+"\u00D7"+a.extentH+"  cap "+a.capWidth+"  fit "+a.rms.toFixed(3);
+    card.appendChild(sub);
+
+    card.addEventListener("click", () => { selected = i; renderSweep(); renderDetail(); });
+    sweepEl.appendChild(card);
+  });
+
+  el("sweepNote").textContent =
+    candidates.length + " of 201 sampled offsets produce a different result at " + d + " px.";
+}
+
+function renderDetail(){
+  const a = candidates[selected];
+  const d = a.d;
+  const fit = fitScale(d);
+  zoom.max = fit; zoomR.max = fit;
+  const scale = zoomLocked ? Math.min(clampInt(zoom.value, 1, fit, fit), fit) : fit;
+  zoom.value = scale; zoomR.value = scale;
+  const bd = clampInt(bands.value, 2, 32, 6);
+  bands.value = bd; bandsR.value = bd;
+
+  paint(el("big"), a, modeSel.value, bd, optAA.checked, scale);
+  paintOverlay(el("bigOv"), a, scale, optGrid.checked, optTrue.checked);
+
+  el("r-radius").textContent = (d/2 + a.eps).toFixed(3);
+  el("r-eps").textContent = fmt(a.eps, 4);
+  el("r-range").textContent = fmt(a.epsLo,3) + " \u2026 " + fmt(a.epsHi,3);
+  el("r-extent").textContent = a.extentW + " \u00D7 " + a.extentH + " px" +
+    ((a.extentW<d || a.extentH<d) ? "  (under size)" : "");
+  el("r-cap").textContent = a.capWidth + " px";
+  el("r-area").textContent = a.area + " px  (" + (a.areaErr>=0?"+":"\u2212") +
+    Math.abs(a.areaErr).toFixed(2) + "% vs true)";
+
+  el("r-fit").textContent = a.rms.toFixed(3) + " px RMS off the true edge";
+
+  const v = el("r-defects");
+  v.textContent = a.defects===0 ? "monotone \u2014 no bumps" : a.defects + " bump" + (a.defects>1?"s":"") + " in the arc";
+  v.className = "verdict " + (a.defects===0 ? "clean" : "dirty");
+
+  drawLadder(el("ladder"), a);
+  el("ladderNote").innerHTML = a.defects===0
+    ? "Every bar is the same height or shorter than the one before it. That's what a round arc looks like."
+    : "<b>Pink bars</b> are taller than the bar to their left \u2014 the arc widens again after narrowing, and the eye reads that as a dent.";
+
+  el("dataOut").textContent =
+    "Row widths, top to bottom (" + d + " rows)\n" +
+    a.widths.join(", ");
+}
+
+/* ---------- wiring ---------- */
+
+function pair(numEl, rangeEl, onChange){
+  const sync = src => {
+    const v = src.value;
+    numEl.value = v; rangeEl.value = v;
+    onChange();
+  };
+  rangeEl.addEventListener("input", () => sync(rangeEl));
+  numEl.addEventListener("change", () => sync(numEl));
+}
+
+pair(dia, diaR, rebuild);
+pair(bands, bandsR, () => { renderSweep(); renderDetail(); });
+pair(zoom, zoomR, () => { zoomLocked = true; renderDetail(); });
+modeSel.addEventListener("change", () => { renderSweep(); renderDetail(); });
+optAA.addEventListener("change", () => { renderSweep(); renderDetail(); });
+optSort.addEventListener("change", renderSweep);
+optGrid.addEventListener("change", renderDetail);
+optTrue.addEventListener("change", renderDetail);
+
+el("copyBtn").addEventListener("click", function(){
+  const txt = candidates[selected].widths.join(", ");
+  const done = () => { this.textContent = "Copied"; setTimeout(()=>{this.textContent="Copy row widths";}, 1400); };
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(txt).then(done, () => selectFallback());
+  } else selectFallback();
+  function selectFallback(){
+    const pre = el("dataOut");
+    const rng = document.createRange();
+    rng.selectNodeContents(pre);
+    const sel = window.getSelection();
+    sel.removeAllRanges(); sel.addRange(rng);
+  }
+});
+
+el("pngBtn").addEventListener("click", function(){
+  const a = candidates[selected];
+  const cv = document.createElement("canvas");
+  paint(cv, a, modeSel.value, clampInt(bands.value,2,32,6), optAA.checked, 1);
+  const link = document.createElement("a");
+  link.download = "circle-" + a.d + "px-eps" + a.eps.toFixed(3) + ".png";
+  link.href = cv.toDataURL("image/png");
+  link.click();
+});
+
+let resizeTimer = null;
+window.addEventListener("resize", () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(renderDetail, 120);
+});
+
+rebuild();
+})();
+</script>
+</body>
+</html>
