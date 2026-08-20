@@ -10,7 +10,7 @@ import {
   loadDirectory,
   loadSuggestions,
   removeDirectoryEntry,
-  setAutoAnnounce,
+  setDirectoryIgnored,
   shortPrincipal,
   type DirectoryEntry,
   type Status,
@@ -117,7 +117,7 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
               value={candidate}
             />
           </label>
-          <div className="nt-cluster">
+          <div className="nt-cluster chipswap-add-designer">
             <button
               className="nt-button nt-button--sm"
               disabled={busy || candidate.trim().length === 0}
@@ -151,26 +151,6 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
             </button>
           </div>
         </div>
-
-        <label className="nt-field chipswap-auto-announce">
-          <input
-            checked={status?.autoAnnounce ?? false}
-            disabled={busy}
-            onChange={(event) => {
-              const enabled = event.currentTarget.checked;
-              void run(async () => {
-                await setAutoAnnounce(enabled);
-                return enabled
-                  ? "New designers will be announced to automatically."
-                  : "Announcing stays a manual choice.";
-              });
-            }}
-            type="checkbox"
-          />
-          <span className="nt-label">
-            Announce me to designers I learn about while refreshing
-          </span>
-        </label>
       </div>
 
       <div className="nt-panel">
@@ -273,6 +253,9 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                       {entry.announced ? (
                         <span className="nt-tag nt-tag--success">announced</span>
                       ) : null}
+                      {entry.ignored ? (
+                        <span className="nt-tag nt-tag--warning">ignored</span>
+                      ) : null}
                     </td>
                     <td>{entry.designCount}</td>
                     <td>
@@ -283,12 +266,12 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                     <td className="nt-cluster">
                       <button
                         className="nt-button nt-button--sm"
-                        disabled={busy}
+                        disabled={busy || entry.ignored}
                         onClick={() =>
                           void run(async () => {
                             const result = await fetchCatalogs([entry.canister]);
                             return result.fetched.length > 0
-                              ? "Catalog refreshed."
+                              ? "Catalogue refreshed."
                               : "That designer did not answer.";
                           })
                         }
@@ -310,6 +293,27 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                         type="button"
                       >
                         {entry.announced ? "Announce again" : "Announce me"}
+                      </button>
+                      <button
+                        className={cx("nt-button nt-button--sm", {
+                          "nt-button--secondary": entry.ignored,
+                          "nt-button--ghost": !entry.ignored,
+                        })}
+                        disabled={busy}
+                        onClick={() =>
+                          void run(async () => {
+                            await setDirectoryIgnored(
+                              entry.canister,
+                              !entry.ignored,
+                            );
+                            return entry.ignored
+                              ? "Back in the store after the next refresh."
+                              : "Ignored. Their chips will not be fetched or shown.";
+                          })
+                        }
+                        type="button"
+                      >
+                        {entry.ignored ? "Stop ignoring" : "Ignore"}
                       </button>
                       <button
                         className="nt-button nt-button--ghost nt-button--sm"

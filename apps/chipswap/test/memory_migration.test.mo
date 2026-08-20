@@ -6,11 +6,17 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Migrate "../backend/memory/chipswap/v1_to_v2";
+import Migrate3 "../backend/memory/chipswap/v2_to_v3";
 import V1 "../backend/memory/chipswap/v1";
 
-// Migration from the released schema, with something in every root. Compiling
+// Migration from the released schemas, with something in every root. Compiling
 // proves the shapes line up; only this proves the values arrive intact and that
 // the trade mode became the requirement it stood for.
+//
+// The file walks both legs in order, because that is the upgrade a canister
+// still running version 1 actually performs: the kernel composes 1 -> 2 -> 3
+// into one atomic upgrade, so the second leg is fed exactly what the first
+// produced rather than a hand-built fixture.
 
 let designer = Principal.fromBlob(Blob.fromArray([0, 1, 1]));
 let peer = Principal.fromBlob(Blob.fromArray([0, 2, 1]));
@@ -289,3 +295,84 @@ assert (replay.recorded_at_ns == 60);
 let ?brush = List.get(fresh.brushes, 0) else Runtime.trap("missing brush");
 assert (brush.name == "L");
 assert (brush.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+// --- Second leg: V2 -> V3 ---------------------------------------------------
+
+let migrated = Migrate3.migrate(fresh);
+
+// Nothing is dropped on the way through. The V2 settings root is the one thing
+// that does not arrive, because V3 has no settings: announcing is a per-peer
+// decision again, and `announced` records those individually.
+assert (migrated.revision == 12);
+assert (migrated.next_request_seq == 5);
+assert (migrated.next_brush_id == 3);
+assert (Map.size(migrated.designs) == 4);
+assert (Map.size(migrated.holdings) == 2);
+assert (Map.size(migrated.directory) == 1);
+assert (Map.size(migrated.catalog_cache) == 1);
+assert (Map.size(migrated.incoming) == 1);
+assert (Map.size(migrated.outgoing) == 1);
+assert (Map.size(migrated.replay) == 1);
+assert (List.size(migrated.brushes) == 1);
+
+// The drafts are still the thing most worth checking: they exist nowhere but
+// here, and they have now survived two conversions rather than one.
+let ?draft3 = Map.get(migrated.designs, Nat.compare, 3) else Runtime.trap("missing design");
+assert (draft3.state == #draft);
+assert (draft3.published_at_ns == null);
+assert (draft3.title == "Design 3");
+assert (draft3.revision == 4);
+assert (draft3.next_serial == 6);
+assert (draft3.created_at_ns == 103);
+assert (draft3.art.palette == [0x000000, 0xffffff]);
+assert (draft3.art.pixels == Blob.fromArray([0, 1, 0]));
+assert (draft3.requirements.approval);
+assert (not draft3.nsfw);
+
+let ?plainDraft3 = Map.get(migrated.designs, Nat.compare, 4) else Runtime.trap("missing design");
+assert (plainDraft3.state == #draft);
+assert (plainDraft3.title == "Design 4");
+assert (not plainDraft3.requirements.approval);
+
+// Published policy is untouched by this leg.
+let ?published3 = Map.get(migrated.designs, Nat.compare, 2) else Runtime.trap("missing design");
+assert (published3.state == #published);
+assert (published3.requirements.approval);
+assert (published3.published_at_ns == ?202);
+
+// Nobody could have been ignored before this version, so nobody arrives
+// ignored — and the announcement already made is still recorded.
+let ?entry3 = Map.get(migrated.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+assert (not entry3.ignored);
+assert (entry3.announced);
+assert (entry3.source == #contacts);
+assert (entry3.first_seen_ns == 5);
+assert (entry3.last_seen_ns == 6);
+assert (entry3.last_catalog_ns == ?7);
+assert (entry3.design_count == 2);
+
+// Chips, trades in flight and the replay record cross the second leg intact,
+// so an upgrade mid-trade still cannot lose a chip or mint one twice.
+let ?held3 = Map.get(migrated.holdings, Text.compare, "held") else Runtime.trap("missing chip");
+assert (held3.ref.serial == 7);
+assert (held3.title == "Held");
+assert (held3.state == #held);
+let ?sent3 = Map.get(migrated.holdings, Text.compare, "sent") else Runtime.trap("missing chip");
+switch (sent3.state) {
+    case (#escrowed(details)) assert (details.request_id == requestId);
+    case (_) Runtime.trap("escrow was not preserved");
+};
+let ?inbound3 = Map.get(migrated.incoming, Text.compare, "inbound") else Runtime.trap("missing trade");
+assert (inbound3.state == #pending);
+assert (inbound3.offered.ref.serial == 7);
+let ?replay3 = Map.get(migrated.replay, Text.compare, "replay") else Runtime.trap("missing replay");
+assert (replay3.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
+
+let ?catalog3 = Map.get(migrated.catalog_cache, Principal.compare, peer) else Runtime.trap("missing catalog");
+assert (catalog3.designs.size() == 2);
+assert (catalog3.designs[1].title == "Peer manual");
+assert (catalog3.designs[1].requirements.approval);
+
+let ?brush3 = List.get(migrated.brushes, 0) else Runtime.trap("missing brush");
+assert (brush3.name == "L");
+assert (brush3.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));

@@ -2,7 +2,7 @@
   "format": 3,
   "name": "Chipswap",
   "id": "chipswap",
-  "version": 106,
+  "version": 107,
   "update_source": "233tv-xiaaa-aaaay-aacta-cai",
   "description": "Design, publish, and trade pixel chips between Neutron canisters",
   "src": "main.mo",
@@ -117,7 +117,7 @@
         "chipswap_set_trade_policy",
         "chipswap_directory_add",
         "chipswap_directory_remove",
-        "chipswap_set_auto_announce",
+        "chipswap_directory_set_ignored",
         "chipswap_brush_save",
         "chipswap_brush_delete",
         "chipswap_trade_forget",
@@ -211,7 +211,7 @@
       "type": "update",
       "async": false
     },
-    "chipswap_set_auto_announce": {
+    "chipswap_directory_set_ignored": {
       "type": "update",
       "async": false
     },
@@ -289,13 +289,16 @@
   },
   "memory": {
     "chipswap": {
-      "version": 2,
+      "version": 3,
       "schemas": {
         "1": {
           "src": "memory/chipswap/v1.mo"
         },
         "2": {
           "src": "memory/chipswap/v2.mo"
+        },
+        "3": {
+          "src": "memory/chipswap/v3.mo"
         }
       },
       "migrations": [
@@ -303,6 +306,11 @@
           "from": 1,
           "to": 2,
           "src": "memory/chipswap/v1_to_v2.mo"
+        },
+        {
+          "from": 2,
+          "to": 3,
+          "src": "memory/chipswap/v2_to_v3.mo"
         }
       ]
     }

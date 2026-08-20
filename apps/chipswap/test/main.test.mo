@@ -5,7 +5,7 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Chipswap "../backend/main";
-import Memory "../backend/memory/chipswap/v2";
+import Memory "../backend/memory/chipswap/v3";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
 
@@ -292,6 +292,48 @@ switch (
     case (#ok(_)) {};
     case (#err(error)) Runtime.trap("directory_add: " # error.code);
 };
+
+// Ignoring is a directory edit the owner can undo, and it is only ever applied
+// to a designer already known: there is nothing to ignore otherwise.
+switch (chipswap.chipswap_directory_set_ignored({ canister = "not-a-principal"; ignored = true })) {
+    case (#ok(_)) Runtime.trap("expected a principal error");
+    case (#err(error)) assert (error.code == "principal_invalid");
+};
+switch (
+    chipswap.chipswap_directory_set_ignored({
+        canister = Principal.toText(self);
+        ignored = true;
+    })
+) {
+    case (#ok(_)) Runtime.trap("expected a miss");
+    case (#err(error)) assert (error.code == "not_found");
+};
+assert (chipswap.chipswap_directory({ offset = 0; limit = 10 }).entries[0].ignored == false);
+switch (
+    chipswap.chipswap_directory_set_ignored({
+        canister = Principal.toText(peer);
+        ignored = true;
+    })
+) {
+    case (#ok(_)) {};
+    case (#err(error)) Runtime.trap("set_ignored: " # error.code);
+};
+let ignoredPage = chipswap.chipswap_directory({ offset = 0; limit = 10 });
+// Still listed, still ours to un-ignore. Forgetting them would let the next
+// exchange hand them straight back with no memory of the decision.
+assert (ignoredPage.total == 1);
+assert (ignoredPage.entries[0].canister == Principal.toText(peer));
+assert (ignoredPage.entries[0].ignored);
+switch (
+    chipswap.chipswap_directory_set_ignored({
+        canister = Principal.toText(peer);
+        ignored = false;
+    })
+) {
+    case (#ok(_)) {};
+    case (#err(error)) Runtime.trap("set_ignored: " # error.code);
+};
+assert (chipswap.chipswap_directory({ offset = 0; limit = 10 }).entries[0].ignored == false);
 
 // The store reads the cache, so it is empty until a catalog is fetched.
 let store = chipswap.chipswap_store({

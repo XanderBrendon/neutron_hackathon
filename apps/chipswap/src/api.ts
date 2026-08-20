@@ -75,7 +75,6 @@ export type Status = {
   catalogDesigners: number;
   incomingPending: number;
   outgoingActive: number;
-  autoAnnounce: boolean;
   shapeId: string;
   pixelCount: number;
   rowWidths: number[];
@@ -89,6 +88,7 @@ export type DirectoryEntry = {
   firstSeenNs: string;
   lastSeenNs: string;
   announced: boolean;
+  ignored: boolean;
   lastCatalogNs: string | null;
   designCount: number;
   ownsChip: boolean;
@@ -359,7 +359,6 @@ export function parseStatus(value: unknown): Status {
     catalogDesigners: natNumber(source.catalog_designers, "catalog designers"),
     incomingPending: natNumber(source.incoming_pending, "incoming pending"),
     outgoingActive: natNumber(source.outgoing_active, "outgoing active"),
-    autoAnnounce: bool(source.auto_announce, "auto announce"),
     shapeId: text(source.shape_id, "shape id"),
     pixelCount: natNumber(source.pixel_count, "pixel count"),
     rowWidths: rowWidths.map((entry) => natNumber(entry, "row width")),
@@ -376,6 +375,7 @@ export function parseDirectoryEntry(value: unknown): DirectoryEntry {
     firstSeenNs: nsText(source.first_seen_ns, "first seen"),
     lastSeenNs: nsText(source.last_seen_ns, "last seen"),
     announced: bool(source.announced, "announced flag"),
+    ignored: bool(source.ignored, "ignored flag"),
     lastCatalogNs: optionalNs(source.last_catalog_ns, "last catalog"),
     designCount: natNumber(source.design_count, "design count"),
     ownsChip: bool(source.owns_chip, "ownership flag"),
@@ -702,10 +702,16 @@ export async function removeDirectoryEntry(canister: string): Promise<number> {
   );
 }
 
-export async function setAutoAnnounce(enabled: boolean): Promise<number> {
+// An ignored designer stays in the directory, so this is a flag on an entry
+// rather than a removal: forgetting them would let the next exchange put them
+// back with no memory of the decision.
+export async function setDirectoryIgnored(
+  canister: string,
+  ignored: boolean,
+): Promise<number> {
   return parseRevision(
-    await updateSelf("chipswap_set_auto_announce", [
-      { enabled },
+    await updateSelf("chipswap_directory_set_ignored", [
+      { canister, ignored },
     ] as unknown as JsonValue[]),
   );
 }

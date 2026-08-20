@@ -15,7 +15,7 @@ import NeutronCapabilities "mo:neutron-capabilities";
 import Contacts "../../contacts/backend/main";
 import ContactMemory "../../contacts/backend/memory/contacts/v2";
 import Chipswap "../backend/main";
-import Memory "../backend/memory/chipswap/v2";
+import Memory "../backend/memory/chipswap/v3";
 
 let self = Principal.fromBlob(Blob.fromArray([0, 0, 0, 0, 0, 16, 0, 1, 1, 1]));
 let peer = Principal.fromBlob(Blob.fromArray([0, 0, 0, 0, 0, 16, 0, 2, 1, 1]));

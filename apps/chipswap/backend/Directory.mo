@@ -6,14 +6,18 @@ import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Text "mo:core/Text";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v2";
+import Memory "./memory/chipswap/v3";
 import Requirements "./Requirements";
 
 // The designer directory and the cached catalogs the store reads from.
 //
 // Learning about a designer never publishes us to them: `announce` is a separate
-// owner decision, so `announced` stays false until the owner acts (or the
-// auto-announce setting does it for them).
+// owner decision, so `announced` stays false until the owner acts.
+//
+// An ignored entry is inert in every outward direction. It is not fetched from,
+// not shared onward, and not read by the store, but it is still an entry, so a
+// peer handing us their directory cannot quietly reinstate a designer the owner
+// has already turned away.
 module {
     public let MAX_DIRECTORY : Nat = 512;
     public let MAX_SHARE : Nat = 32;
@@ -54,6 +58,7 @@ module {
                         first_seen_ns = now;
                         last_seen_ns = now;
                         announced = false;
+                        ignored = false;
                         last_catalog_ns = null;
                         design_count = 0;
                     },
@@ -74,35 +79,25 @@ module {
         note(mem, canister, source, now);
     };
 
-    // Merge a peer's shared directory. Bounded by MAX_SHARE so one exchange
-    // cannot flood the table, and never adds us.
+    // Merge a peer's shared directory, returning how many entries are new.
+    // Bounded by MAX_SHARE so one exchange cannot flood the table, and never
+    // adds us.
     public func merge(
         mem : Memory.Mem,
         entries : [Principal],
         self : Principal,
         now : Int,
     ) : Nat {
-        mergeReturningNew(mem, entries, self, now).size();
-    };
-
-    // The principals this exchange taught us about, for the caller that offers
-    // to announce itself to them.
-    public func mergeReturningNew(
-        mem : Memory.Mem,
-        entries : [Principal],
-        self : Principal,
-        now : Int,
-    ) : [Principal] {
-        let added = List.empty<Principal>();
+        var added = 0;
         var considered = 0;
         for (candidate in entries.values()) {
-            if (considered >= MAX_SHARE) return List.toArray(added);
+            if (considered >= MAX_SHARE) return added;
             if (not Principal.equal(candidate, self)) {
                 considered += 1;
-                if (note(mem, candidate, #exchange, now)) List.add(added, candidate);
+                if (note(mem, candidate, #exchange, now)) added += 1;
             };
         };
-        List.toArray(added);
+        added;
     };
 
     public func markAnnounced(mem : Memory.Mem, canister : Principal, now : Int) : () {
@@ -116,6 +111,38 @@ module {
                 );
             };
             case null {};
+        };
+    };
+
+    public func ignored(mem : Memory.Mem, canister : Principal) : Bool {
+        switch (get(mem, canister)) {
+            case (?entry) entry.ignored;
+            case null false;
+        };
+    };
+
+    // Ignoring drops the cached catalog with the flag. We will never fetch this
+    // designer again while they are ignored, so anything still cached could only
+    // grow staler behind a row the owner has said they do not want; the store
+    // reads the cache, so leaving it would leave them on display. Un-ignoring
+    // therefore shows nothing until the next refresh, which is honest.
+    public func setIgnored(
+        mem : Memory.Mem,
+        canister : Principal,
+        ignore_ : Bool,
+    ) : Bool {
+        switch (get(mem, canister)) {
+            case (?existing) {
+                Map.add(
+                    mem.directory,
+                    Principal.compare,
+                    canister,
+                    { existing with ignored = ignore_ },
+                );
+                if (ignore_) Map.remove(mem.catalog_cache, Principal.compare, canister);
+                true;
+            };
+            case null false;
         };
     };
 
@@ -144,8 +171,12 @@ module {
             },
         );
         let picked = List.empty<Principal>();
-        for ((canister, _) in entries.values()) {
-            if (List.size(picked) < cap and not Principal.equal(canister, self)) {
+        for ((canister, entry) in entries.values()) {
+            if (
+                List.size(picked) < cap and
+                not entry.ignored and
+                not Principal.equal(canister, self)
+            ) {
                 List.add(picked, canister);
             };
         };
@@ -238,7 +269,9 @@ module {
         var hidden = 0;
         for ((designer, catalog) in catalogs.values()) {
             let ownsDesigner = Holdings.ownsAnyFrom(mem, designer);
-            if (designerOwnershipMatches(filter, ownsDesigner)) {
+            // Ignoring already emptied the cache; this keeps the store correct
+            // even if some other path caches a designer after they are ignored.
+            if (not ignored(mem, designer) and designerOwnershipMatches(filter, ownsDesigner)) {
                 for (design in catalog.designs.values()) {
                     let owned = Holdings.ownsDesign(mem, designer, design.design_id);
                     if (
@@ -312,10 +345,18 @@ module {
 
     // Drop the least recently seen peer we neither announced to nor hold a chip
     // from. If every entry is protected, the table simply stops growing.
+    //
+    // An ignored entry is protected too, and for the same reason it exists: it
+    // is a decision, and evicting it would let the next exchange reinstate the
+    // designer as though the owner had never turned them away.
     func evictOne(mem : Memory.Mem) : () {
         var victim : ?(Principal, Int) = null;
         for ((canister, entry) in Map.entries(mem.directory)) {
-            if (not entry.announced and not Holdings.ownsAnyFrom(mem, canister)) {
+            if (
+                not entry.announced and
+                not entry.ignored and
+                not Holdings.ownsAnyFrom(mem, canister)
+            ) {
                 switch (victim) {
                     case (?(_, seen)) {
                         if (entry.last_seen_ns < seen) victim := ?(canister, entry.last_seen_ns);

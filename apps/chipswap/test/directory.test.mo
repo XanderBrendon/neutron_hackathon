@@ -6,7 +6,7 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v2";
+import Memory "../backend/memory/chipswap/v3";
 import Shape "../backend/Shape";
 
 func principalOf(seed : Nat) : Principal {
@@ -23,6 +23,7 @@ func principalOf(seed : Nat) : Principal {
 let self = principalOf(1);
 let alice = principalOf(2);
 let bob = principalOf(3);
+let carol = principalOf(4);
 
 let art : Memory.Art = {
     shape_id = Shape.SHAPE_ID;
@@ -75,6 +76,10 @@ assert (entry.source == #manual);
 assert (entry.first_seen_ns == 100);
 assert (entry.last_seen_ns == 200);
 assert (entry.announced == false);
+assert (entry.ignored == false);
+assert (Directory.ignored(mem, alice) == false);
+// Nothing to set the flag on is a miss, not a silent no-op.
+assert (Directory.setIgnored(mem, principalOf(999), true) == false);
 
 // We never add ourselves, and non-canister principals are refused.
 assert (Directory.note(mem, self, #manual, 100) == true);
@@ -121,6 +126,10 @@ switch (Holdings.admit(evicting, chip(bob, 1, 1))) {
     case (#ok(())) {};
     case (#err(code)) Runtime.trap(code);
 };
+// Ignoring is a decision, and an evicted decision is no decision at all: the
+// next exchange would hand carol back with a clean slate.
+assert (Directory.note(evicting, carol, #exchange, 11));
+assert (Directory.setIgnored(evicting, carol, true));
 var seed = 5000;
 while (Map.size(evicting.directory) < Directory.MAX_DIRECTORY) {
     ignore Directory.note(evicting, principalOf(seed), #exchange, 12);
@@ -131,6 +140,8 @@ assert (Directory.note(evicting, principalOf(seed), #exchange, 13));
 assert (Map.size(evicting.directory) == Directory.MAX_DIRECTORY);
 assert (Directory.get(evicting, alice) != null);
 assert (Directory.get(evicting, bob) != null);
+assert (Directory.get(evicting, carol) != null);
+assert (Directory.ignored(evicting, carol));
 
 // Catalogs are cached per designer and evicted least-recently-fetched first.
 let store = Memory.init();
@@ -257,3 +268,63 @@ assert (Directory.validFilter(filterOf("nope", "all", "all", "hide")) == false);
 assert (Directory.validFilter(filterOf("all", "nope", "all", "hide")) == false);
 assert (Directory.validFilter(filterOf("all", "all", "nope", "hide")) == false);
 assert (Directory.validFilter(filterOf("all", "all", "all", "nope")) == false);
+
+// Ignoring reaches three places at once: what we fetch, what we pass on, and
+// what the store shows. The entry itself stays, which is the whole point.
+let ignoring = Memory.init();
+ignore Directory.note(ignoring, alice, #manual, 10);
+ignore Directory.note(ignoring, bob, #manual, 20);
+Directory.storeCatalog(ignoring, alice, [cachedDesign(1, OPEN, false)], 30);
+Directory.storeCatalog(ignoring, bob, [cachedDesign(1, OPEN, false)], 40);
+
+let openFilter : Directory.StoreFilter = {
+    ownership = "all";
+    designer_ownership = "all";
+    policy = "all";
+    nsfw = "show";
+};
+assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 2);
+assert (Directory.share(ignoring, self, 10).size() == 2);
+
+assert (Directory.setIgnored(ignoring, bob, true));
+assert (Directory.ignored(ignoring, bob));
+// Still known, so a peer re-sharing bob cannot quietly reinstate him.
+assert (Directory.get(ignoring, bob) != null);
+assert (Map.size(ignoring.directory) == 2);
+assert (Directory.note(ignoring, bob, #exchange, 50) == false);
+assert (Directory.ignored(ignoring, bob));
+assert (Directory.merge(ignoring, [bob], self, 60) == 0);
+assert (Directory.ignored(ignoring, bob));
+
+// The cache went with the flag, so bob's row leaves the store rather than
+// sitting there growing stale behind a refresh that will never come.
+assert (Map.get(ignoring.catalog_cache, Principal.compare, bob) == null);
+assert (Map.get(ignoring.catalog_cache, Principal.compare, alice) != null);
+assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 1);
+assert (Directory.storeRows(ignoring, openFilter, 0, 50).rows[0].designer == alice);
+
+// And we stop carrying bob onward to the peers we talk to.
+let sharedAfter = Directory.share(ignoring, self, 10);
+assert (sharedAfter.size() == 1);
+assert (sharedAfter[0] == alice);
+
+// Un-ignoring restores the entry, not the catalogue: the store stays quiet
+// until the next refresh actually fetches something.
+assert (Directory.setIgnored(ignoring, bob, false));
+assert (Directory.ignored(ignoring, bob) == false);
+assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 1);
+assert (Directory.share(ignoring, self, 10).size() == 2);
+Directory.storeCatalog(ignoring, bob, [cachedDesign(1, OPEN, false)], 70);
+assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 2);
+
+// A catalogue cached before the flag is set is still not shown, so the store
+// never depends on the cache having been cleared by exactly one code path.
+Directory.storeCatalog(ignoring, bob, [cachedDesign(1, OPEN, false)], 80);
+Map.add(
+    ignoring.directory,
+    Principal.compare,
+    bob,
+    { (switch (Directory.get(ignoring, bob)) { case (?e) e; case null Runtime.trap("missing") }) with ignored = true },
+);
+assert (Map.get(ignoring.catalog_cache, Principal.compare, bob) != null);
+assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 1);

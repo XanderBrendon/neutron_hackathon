@@ -186,7 +186,6 @@ test("status reports the geometry the editor draws with", () => {
     catalog_designers: "2",
     incoming_pending: "1",
     outgoing_active: "0",
-    auto_announce: false,
     shape_id: "circle31",
     pixel_count: "757",
     row_widths: ["9", "13"],
@@ -198,7 +197,6 @@ test("status reports the geometry the editor draws with", () => {
   expect(status.pixelCount).toBe(757);
   expect(status.rowWidths).toEqual([9, 13]);
   expect(status.contactsAvailable).toBe(true);
-  expect(status.autoAnnounce).toBe(false);
 });
 
 test("directory and store rows carry the ownership flags the filters use", () => {
@@ -208,10 +206,12 @@ test("directory and store rows carry the ownership flags the filters use", () =>
     first_seen_ns: "1",
     last_seen_ns: "2",
     announced: true,
+    ignored: true,
     design_count: "3",
     owns_chip: false,
   });
   expect(entry.announced).toBe(true);
+  expect(entry.ignored).toBe(true);
   expect(entry.lastCatalogNs).toBeNull();
   expect(entry.ownsChip).toBe(false);
 

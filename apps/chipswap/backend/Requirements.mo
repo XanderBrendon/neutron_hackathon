@@ -1,7 +1,7 @@
 import Map "mo:core/Map";
 import Nat32 "mo:core/Nat32";
 import Nat8 "mo:core/Nat8";
-import Memory "./memory/chipswap/v2";
+import Memory "./memory/chipswap/v3";
 import Shape "./Shape";
 
 // What a designer asks of a chip offered for one of their designs, and the

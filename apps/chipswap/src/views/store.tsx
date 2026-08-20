@@ -81,9 +81,17 @@ export const Store = ({ status, onChanged }: Props) => {
     setMessage(null);
     try {
       const directory = await loadDirectory(0, 100);
-      const targets = directory.entries.map((entry) => entry.canister);
+      // The backend drops ignored designers too, but filtering here keeps them
+      // from consuming slots in a batch that is capped at eight.
+      const targets = directory.entries
+        .filter((entry) => !entry.ignored)
+        .map((entry) => entry.canister);
       if (targets.length === 0) {
-        setMessage("Add a designer in the Directory first.");
+        setMessage(
+          directory.total === 0
+            ? "Add a designer in the Directory first."
+            : "Every designer in your directory is ignored.",
+        );
         return;
       }
       let fetched = 0;

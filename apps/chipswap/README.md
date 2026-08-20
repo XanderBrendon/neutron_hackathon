@@ -58,9 +58,17 @@ chip the other side may already hold.
 
 **Directory.** Every trade carries up to 32 designer addresses in each
 direction, so trading is also how you discover new designers. Learning about
-someone does *not* publish you to them: `announce` is a separate choice, with an
-optional setting that announces automatically while you refresh catalogs.
-Contacts entries carrying a Neutron address can be added directly.
+someone does *not* publish you to them: `announce` is a separate choice you make
+one designer at a time. Contacts entries carrying a Neutron address can be added
+directly.
+
+**Ignoring a designer.** Ignoring is not forgetting. A forgotten designer comes
+straight back the next time a peer shares their directory, with no memory of
+having been turned away; an ignored one stays in your list saying so. While a
+designer is ignored their catalog is never fetched, their cached designs leave
+the store, and you stop passing their address on to peers. Un-ignoring restores
+the entry, not the catalog: nothing of theirs reappears until the next refresh
+actually fetches something.
 
 **Store.** The store reads a bounded cache of the catalogs you have fetched, so
 it opens instantly and refreshes explicitly. It filters by ownership, by
@@ -108,7 +116,7 @@ remains.
 ```sh
 cd apps/chipswap
 npm test              # package + bun tests + Motoko tests
-npm run package       # writes chipswap.v0.1.6.neutron
+npm run package       # writes chipswap.v0.1.7.neutron
 npm run test:motoko   # Motoko unit tests only
 ```
 

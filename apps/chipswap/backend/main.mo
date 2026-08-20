@@ -13,7 +13,7 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v2";
+import Memory "./memory/chipswap/v3";
 import PrincipalText "./PrincipalText";
 import Requirements "./Requirements";
 import Shape "./Shape";
@@ -151,7 +151,6 @@ module {
         catalog_designers : Nat;
         incoming_pending : Nat;
         outgoing_active : Nat;
-        auto_announce : Bool;
         shape_id : Text;
         pixel_count : Nat;
         row_widths : [Nat];
@@ -170,6 +169,7 @@ module {
         first_seen_ns : Int;
         last_seen_ns : Int;
         announced : Bool;
+        ignored : Bool;
         last_catalog_ns : ?Int;
         design_count : Nat;
         owns_chip : Bool;
@@ -318,7 +318,7 @@ module {
 
     public type CanisterRequest = { canister : Text };
 
-    public type AutoAnnounceRequest = { enabled : Bool };
+    public type IgnoreRequest = { canister : Text; ignored : Bool };
 
     public type StoreRequest = {
         ownership : Text;
@@ -422,9 +422,6 @@ module {
 
     let CANDID_SLACK : Nat = 64;
     let MAX_FETCH_TARGETS : Nat = 8;
-    // Auto-announce rides on a refresh the owner asked for, and is bounded so
-    // one refresh cannot fan out into an unbounded number of paid calls.
-    let MAX_AUTO_ANNOUNCE : Nat = 4;
     let MAX_BRUSH_CELLS : Nat = 49;
     let MAX_BRUSHES : Nat = 16;
     let MAX_BRUSH_NAME_CHARS : Nat = 24;
@@ -467,7 +464,6 @@ module {
                 catalog_designers = Map.size(mem.catalog_cache);
                 incoming_pending = incoming;
                 outgoing_active = outgoing;
-                auto_announce = mem.settings.auto_announce;
                 shape_id = Shape.SHAPE_ID;
                 pixel_count = Shape.PIXEL_COUNT;
                 row_widths = Shape.ROW_WIDTHS;
@@ -514,6 +510,7 @@ module {
                             first_seen_ns = entry.first_seen_ns;
                             last_seen_ns = entry.last_seen_ns;
                             announced = entry.announced;
+                            ignored = entry.ignored;
                             last_catalog_ns = entry.last_catalog_ns;
                             design_count = entry.design_count;
                             owns_chip = Holdings.ownsAnyFrom(mem, entry.canister);
@@ -797,10 +794,19 @@ module {
             #ok({ revision = mem.revision });
         };
 
-        public func /*update*/chipswap_set_auto_announce(
-            request : AutoAnnounceRequest
+        // Ignoring is a directory edit, not a trade decision: it changes who we
+        // ask for catalogs and who we pass on, and nothing about chips already
+        // held or offers already in flight.
+        public func /*update*/chipswap_directory_set_ignored(
+            request : IgnoreRequest
         ) : RevisionResult {
-            mem.settings := { auto_announce = request.enabled };
+            let canister = switch (parsePrincipal(request.canister)) {
+                case (#err(code)) return #err(error(code));
+                case (#ok(value)) value;
+            };
+            if (not Directory.setIgnored(mem, canister, request.ignored)) {
+                return #err(error("not_found"));
+            };
             bump();
             #ok({ revision = mem.revision });
         };
@@ -943,7 +949,12 @@ module {
                 switch (parsePrincipal(text)) {
                     case (#err(code)) return #err(error(code));
                     case (#ok(value)) {
-                        if (not Principal.equal(value, self)) List.add(targets, value);
+                        // Ignored designers drop out the same way we do: silently,
+                        // because "did not answer" would be untrue of a call we
+                        // chose not to make.
+                        if (not Principal.equal(value, self) and not Directory.ignored(mem, value)) {
+                            List.add(targets, value);
+                        };
                     };
                 };
             };
@@ -968,7 +979,6 @@ module {
 
             let fetched = List.empty<Text>();
             let failed = List.empty<Text>();
-            let discovered = List.empty<Principal>();
             let ordered = List.toArray(targets);
             var index = 0;
             while (index < ordered.size()) {
@@ -995,9 +1005,7 @@ module {
                             ),
                             now,
                         );
-                        for (learned in Directory.mergeReturningNew(mem, catalog.directory, self, now).values()) {
-                            List.add(discovered, learned);
-                        };
+                        ignore Directory.merge(mem, catalog.directory, self, now);
                         List.add(fetched, Principal.toText(target));
                     };
                     case null List.add(failed, Principal.toText(target));
@@ -1005,77 +1013,11 @@ module {
                 index += 1;
             };
             bump();
-
-            if (mem.settings.auto_announce and List.size(discovered) > 0) {
-                await* announceToNew(List.toArray(discovered));
-            };
-
             #ok({
                 fetched = List.toArray(fetched);
                 failed = List.toArray(failed);
                 revision = mem.revision;
             });
-        };
-
-        // Publishes this Neutron into the directories of peers we just learned
-        // about, when the owner has asked for that to happen automatically.
-        func announceToNew(candidates : [Principal]) : async* () {
-            let now = Time.now();
-            let payload : PeerAnnounceRequest = {
-                directory = Directory.share(mem, self, Directory.MAX_SHARE);
-            };
-            let request : NeutronCapabilities.PublicIngressRequestV1 = {
-                method = ROUTE_ANNOUNCE;
-                payload = to_candid (payload);
-            };
-            let targets = List.empty<Principal>();
-            for (candidate in candidates.values()) {
-                if (List.size(targets) < MAX_AUTO_ANNOUNCE) {
-                    switch (Directory.get(mem, candidate)) {
-                        case (?entry) if (not entry.announced) List.add(targets, candidate);
-                        case null {};
-                    };
-                };
-            };
-            if (List.size(targets) == 0) return;
-            let ordered = List.toArray(targets);
-            let results = await* calls.call_batch(
-                Array.map<Principal, NeutronCapabilities.BackendCallRequestV1>(
-                    ordered,
-                    func(target) {
-                        {
-                            canister = target;
-                            method = INGRESS_METHOD;
-                            args = to_candid (request);
-                            cycles = ANNOUNCE_CYCLES;
-                        };
-                    },
-                )
-            );
-            var index = 0;
-            while (index < ordered.size()) {
-                if (index < results.size()) {
-                    switch (results[index]) {
-                        case (#ok(reply)) {
-                            switch (unwrapReply(reply, 4_096)) {
-                                case (?bytes) {
-                                    switch (Wire.decodeAnnounceReply(bytes)) {
-                                        case (?#ok(answer)) {
-                                            Directory.markAnnounced(mem, ordered[index], now);
-                                            ignore Directory.merge(mem, answer.directory, self, now);
-                                        };
-                                        case (_) {};
-                                    };
-                                };
-                                case null {};
-                            };
-                        };
-                        case (#err(_)) {};
-                    };
-                };
-                index += 1;
-            };
-            bump();
         };
 
         public func /*update*/chipswap_trade_propose(
@@ -1775,8 +1717,8 @@ public type chipswap_directory_add_Output = RevisionResult;
 public type chipswap_directory_remove_Input = (request : CanisterRequest);
 public type chipswap_directory_remove_Output = RevisionResult;
 
-public type chipswap_set_auto_announce_Input = (request : AutoAnnounceRequest);
-public type chipswap_set_auto_announce_Output = RevisionResult;
+public type chipswap_directory_set_ignored_Input = (request : IgnoreRequest);
+public type chipswap_directory_set_ignored_Output = RevisionResult;
 
 public type chipswap_brush_save_Input = (request : SaveBrushRequest);
 public type chipswap_brush_save_Output = RevisionResult;

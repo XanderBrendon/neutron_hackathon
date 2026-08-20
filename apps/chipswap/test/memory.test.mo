@@ -5,7 +5,7 @@ import Map "mo:core/Map";
 import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Text "mo:core/Text";
-import Memory "../backend/memory/chipswap/v2";
+import Memory "../backend/memory/chipswap/v3";
 
 // A clean install starts empty and every managed root is reachable.
 let mem = Memory.init();
@@ -19,7 +19,6 @@ assert (Map.size(mem.incoming) == 0);
 assert (Map.size(mem.outgoing) == 0);
 assert (Map.size(mem.replay) == 0);
 assert (List.size(mem.brushes) == 0);
-assert (mem.settings.auto_announce == false);
 
 let designer = Principal.fromBlob(Blob.fromArray([0, 1, 1]));
 let peer = Principal.fromBlob(Blob.fromArray([0, 2, 1]));
@@ -75,6 +74,7 @@ let entry : Memory.DirectoryEntry = {
     first_seen_ns = 5;
     last_seen_ns = 6;
     announced = false;
+    ignored = false;
     last_catalog_ns = null;
     design_count = 0;
 };
@@ -162,8 +162,6 @@ List.add(
 );
 assert (List.size(mem.brushes) == 1);
 
-mem.settings := { auto_announce = true };
-assert (mem.settings.auto_announce);
 mem.revision += 1;
 mem.next_request_seq += 1;
 assert (mem.revision == 1);

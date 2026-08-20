@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 106,
+    version: 107,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -54,16 +54,21 @@ test("chipswap manifest validates and declares its identity and tile", async () 
         icon: "static/icon.svg",
       },
     ],
-    // Requirements and the NSFW tag changed the persistent shape, so v1 stays
-    // exactly as released and v2 arrives beside it with one path between them.
+    // Every released schema stays exactly as released, so each persistent change
+    // adds a version beside its predecessors. The edges are linear and complete,
+    // which is what lets a canister still on v1 reach v3 in one upgrade.
     memory: {
       chipswap: {
-        version: 2,
+        version: 3,
         schemas: {
           1: { src: "memory/chipswap/v1.mo" },
           2: { src: "memory/chipswap/v2.mo" },
+          3: { src: "memory/chipswap/v3.mo" },
         },
-        migrations: [{ from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" }],
+        migrations: [
+          { from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" },
+          { from: 2, to: 3, src: "memory/chipswap/v2_to_v3.mo" },
+        ],
       },
     },
   });

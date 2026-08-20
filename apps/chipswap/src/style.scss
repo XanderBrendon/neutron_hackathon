@@ -472,12 +472,11 @@
     gap: var(--nt-gap-2);
   }
 
-  .chipswap-auto-announce {
-    align-items: center;
-    display: flex;
-    flex-direction: row;
-    gap: var(--nt-gap-2);
-    margin-top: var(--nt-gap-2);
+  // The buttons share a form-grid row with a labelled input. Left to stretch,
+  // the cluster centres them across the label as well, floating them above the
+  // input they belong to; ending the cluster sits them on the input's baseline.
+  .chipswap-add-designer {
+    align-self: end;
   }
 
   @container (max-width: 980px) {
