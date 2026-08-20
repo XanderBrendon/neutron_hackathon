@@ -13,7 +13,7 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v3";
+import Memory "./memory/chipswap/v4";
 import PrincipalText "./PrincipalText";
 import Requirements "./Requirements";
 import Shape "./Shape";
@@ -151,6 +151,7 @@ module {
         catalog_designers : Nat;
         incoming_pending : Nat;
         outgoing_active : Nat;
+        crawl : CrawlView;
         shape_id : Text;
         pixel_count : Nat;
         row_widths : [Nat];
@@ -168,12 +169,23 @@ module {
         source : Text;
         first_seen_ns : Int;
         last_seen_ns : Int;
-        announced : Bool;
         ignored : Bool;
+        retired : Bool;
+        strikes : Nat;
         last_catalog_ns : ?Int;
         design_count : Nat;
         owns_chip : Bool;
         contact_name : ?Text;
+    };
+
+    // What the tile needs to draw a crawl: whether one is running, how far it
+    // has got, and how much of the directory it has still to ask.
+    public type CrawlView = {
+        active : Bool;
+        queried : Nat;
+        discovered : Nat;
+        remaining : Nat;
+        full : Bool;
     };
 
     public type DirectoryPage = {
@@ -272,7 +284,12 @@ module {
     };
 
     public type FetchCatalogsResult = {
-        #ok : { fetched : [Text]; failed : [Text]; revision : Nat };
+        #ok : { fetched : [Text]; failed : [Text]; retired : [Text]; revision : Nat };
+        #err : Err;
+    };
+
+    public type CrawlResult = {
+        #ok : CrawlView;
         #err : Err;
     };
 
@@ -319,6 +336,8 @@ module {
     public type CanisterRequest = { canister : Text };
 
     public type IgnoreRequest = { canister : Text; ignored : Bool };
+
+    public type RetireRequest = { canister : Text; retired : Bool };
 
     public type StoreRequest = {
         ownership : Text;
@@ -378,13 +397,15 @@ module {
         minted_at_ns : Int;
     };
 
-    public type PeerCatalogRequest = { directory : [Principal] };
+    // A catalogue read asks for nothing but the catalogue. It used to carry a
+    // directory, and the reply used to carry one back; discovery is its own
+    // request now.
+    public type PeerCatalogRequest = {};
 
     public type PeerTradeRequest = {
         request_id : Blob;
         want_design_id : Nat;
         offered : PeerChip;
-        directory : [Principal];
     };
 
     public type PeerDeliverOutcome = {
@@ -396,21 +417,25 @@ module {
     public type PeerDeliverRequest = {
         request_id : Blob;
         outcome : PeerDeliverOutcome;
-        directory : [Principal];
     };
 
     public type PeerStatusRequest = { request_id : Blob };
 
-    public type PeerAnnounceRequest = { directory : [Principal] };
+    // One page of a peer's directory. The reply says how many entries the peer
+    // has in total, so a crawler knows whether to ask for the next page.
+    public type PeerDirectoryRequest = { offset : Nat; limit : Nat };
 
     // --- Protocol constants -------------------------------------------------
 
     let INGRESS_METHOD : Text = "app_chipswap__chipswap_v1_update";
+    // The crawl's route is a query, and a query dispatcher is a different
+    // physical method from the update one.
+    let INGRESS_QUERY_METHOD : Text = "app_chipswap__chipswap_v1_query";
     let ROUTE_CATALOG : Text = "catalog";
     let ROUTE_TRADE : Text = "trade";
     let ROUTE_DELIVER : Text = "deliver";
     let ROUTE_STATUS : Text = "status";
-    let ROUTE_ANNOUNCE : Text = "announce";
+    let ROUTE_DIRECTORY : Text = "directory";
 
     // Each floor matches capabilities.public_ingress in neutron.json. The sender
     // pays for the work and storage it asks a peer to perform.
@@ -418,10 +443,16 @@ module {
     let TRADE_CYCLES : Nat = 600_000_000;
     let DELIVER_CYCLES : Nat = 600_000_000;
     let STATUS_CYCLES : Nat = 200_000_000;
-    let ANNOUNCE_CYCLES : Nat = 200_000_000;
+    // A query route declares no floor and can accept nothing, so a crawl costs
+    // the peer nothing and attaches nothing.
+    let DIRECTORY_CYCLES : Nat = 0;
 
     let CANDID_SLACK : Nat = 64;
     let MAX_FETCH_TARGETS : Nat = 8;
+    // One crawl step, bounded by the same concurrency the manifest declares.
+    let MAX_CRAWL_TARGETS : Nat = 8;
+    let CRAWL_PAGE : Nat = 128;
+    let MAX_DIRECTORY_REPLY_BYTES : Nat = 8_192;
     let MAX_BRUSH_CELLS : Nat = 49;
     let MAX_BRUSHES : Nat = 16;
     let MAX_BRUSH_NAME_CHARS : Nat = 24;
@@ -464,6 +495,7 @@ module {
                 catalog_designers = Map.size(mem.catalog_cache);
                 incoming_pending = incoming;
                 outgoing_active = outgoing;
+                crawl = crawlView();
                 shape_id = Shape.SHAPE_ID;
                 pixel_count = Shape.PIXEL_COUNT;
                 row_widths = Shape.ROW_WIDTHS;
@@ -509,8 +541,9 @@ module {
                             source = Directory.sourceText(entry.source);
                             first_seen_ns = entry.first_seen_ns;
                             last_seen_ns = entry.last_seen_ns;
-                            announced = entry.announced;
                             ignored = entry.ignored;
+                            retired = entry.retired;
+                            strikes = entry.strikes;
                             last_catalog_ns = entry.last_catalog_ns;
                             design_count = entry.design_count;
                             owns_chip = Holdings.ownsAnyFrom(mem, entry.canister);
@@ -811,6 +844,25 @@ module {
             #ok({ revision = mem.revision });
         };
 
+        // Retirement is a conclusion this canister drew from calls that went
+        // unanswered, so the owner is allowed to overrule it in either
+        // direction: to put a designer back into rotation whose canister was
+        // merely stopped, or to retire one they know is gone without waiting for
+        // three more failed calls to say so.
+        public func /*update*/chipswap_directory_set_retired(
+            request : RetireRequest
+        ) : RevisionResult {
+            let canister = switch (parsePrincipal(request.canister)) {
+                case (#err(code)) return #err(error(code));
+                case (#ok(value)) value;
+            };
+            if (not Directory.setRetired(mem, canister, request.retired)) {
+                return #err(error("not_found"));
+            };
+            bump();
+            #ok({ revision = mem.revision });
+        };
+
         // --- Brush library ----------------------------------------------------
 
         public func /*update*/chipswap_brush_save(
@@ -906,37 +958,81 @@ module {
 
         // --- Outbound protocol -----------------------------------------------
 
-        public func /*update*/chipswap_announce(
-            request : CanisterRequest
-        ) : async* RevisionResult {
-            let canister = switch (parsePrincipal(request.canister)) {
-                case (#err(code)) return #err(error(code));
-                case (#ok(value)) value;
+        // --- Crawl -------------------------------------------------------------
+
+        // Begin again from the whole directory. Starting over rather than
+        // resuming is the point of a separate call: a crawl that finished last
+        // week has visited everyone, and asking it to continue would do nothing.
+        public func /*update*/chipswap_crawl_start(()) : CrawlResult {
+            Directory.startCrawl(mem, Time.now());
+            bump();
+            #ok(crawlView());
+        };
+
+        public func /*update*/chipswap_crawl_stop(()) : CrawlResult {
+            Directory.stopCrawl(mem);
+            bump();
+            #ok(crawlView());
+        };
+
+        // One round of the crawl: ask up to eight peers for one page each of
+        // their directory, save whoever is new, and report what is left.
+        //
+        // A peer who does not answer is dropped from this crawl rather than
+        // retried, and is never struck for it. The route is a query, and a peer
+        // on the previous release has no query dispatcher at all — retiring a
+        // designer for not having upgraded yet would be a lie about the one
+        // thing that flag claims to know.
+        public func /*update*/chipswap_crawl_step(()) : async* CrawlResult {
+            if (not Directory.crawling(mem)) return #err(error("no_crawl"));
+            let targets = Directory.crawlTargets(mem, MAX_CRAWL_TARGETS);
+            if (targets.size() == 0) {
+                bump();
+                return #ok(crawlView());
             };
-            if (Principal.equal(canister, self)) return #err(error("self_entry"));
-            let now = Time.now();
-            let payload : PeerAnnounceRequest = {
-                directory = Directory.share(mem, self, Directory.MAX_SHARE);
-            };
-            let reply = await* callRoute(
-                canister,
-                ROUTE_ANNOUNCE,
-                to_candid (payload),
-                ANNOUNCE_CYCLES,
-                4_096,
+
+            let payloads = Array.map<Directory.CrawlTarget, NeutronCapabilities.BackendCallRequestV1>(
+                targets,
+                func(target) {
+                    let request : NeutronCapabilities.PublicIngressRequestV1 = {
+                        method = ROUTE_DIRECTORY;
+                        payload = to_candid ({ offset = target.offset; limit = CRAWL_PAGE } : PeerDirectoryRequest);
+                    };
+                    {
+                        canister = target.canister;
+                        method = INGRESS_QUERY_METHOD;
+                        args = to_candid (request);
+                        cycles = DIRECTORY_CYCLES;
+                    };
+                },
             );
-            let ?bytes = reply else return #err(error("unreachable"));
-            let ?answer = Wire.decodeAnnounceReply(bytes) else return #err(error("invalid_reply"));
-            switch (answer) {
-                case (#err(payload2)) return #err(error(payload2.code));
-                case (#ok(payload2)) {
-                    ignore Directory.note(mem, canister, #announce, now);
-                    Directory.markAnnounced(mem, canister, now);
-                    ignore Directory.merge(mem, payload2.directory, self, now);
-                    bump();
-                    #ok({ revision = mem.revision });
+            let results = await* calls.call_batch(payloads);
+
+            let now = Time.now();
+            var index = 0;
+            while (index < targets.size()) {
+                let target = targets[index];
+                let page = if (index < results.size()) {
+                    directoryFromResult(?results[index]);
+                } else null;
+                switch (page) {
+                    case (?answer) {
+                        ignore Directory.noteCrawlPage(
+                            mem,
+                            target.canister,
+                            target.offset,
+                            answer.entries,
+                            answer.total,
+                            self,
+                            now,
+                        );
+                    };
+                    case null Directory.finishCrawlPeer(mem, target.canister);
                 };
+                index += 1;
             };
+            bump();
+            #ok(crawlView());
         };
 
         public func /*update*/chipswap_fetch_catalogs(
@@ -949,10 +1045,10 @@ module {
                 switch (parsePrincipal(text)) {
                     case (#err(code)) return #err(error(code));
                     case (#ok(value)) {
-                        // Ignored designers drop out the same way we do: silently,
-                        // because "did not answer" would be untrue of a call we
-                        // chose not to make.
-                        if (not Principal.equal(value, self) and not Directory.ignored(mem, value)) {
+                        // Ignored and retired designers drop out the same way we
+                        // do: silently, because "did not answer" would be untrue
+                        // of a call we chose not to make.
+                        if (not Principal.equal(value, self) and Directory.reachable(mem, value)) {
                             List.add(targets, value);
                         };
                     };
@@ -961,9 +1057,7 @@ module {
             if (List.size(targets) == 0) return #err(error("invalid_request"));
 
             let now = Time.now();
-            let share = Directory.share(mem, self, Directory.MAX_SHARE);
-            let payload : PeerCatalogRequest = { directory = share };
-            let args = to_candid (payload);
+            let args = to_candid ({} : PeerCatalogRequest);
             let requests = Array.map<Principal, NeutronCapabilities.BackendCallRequestV1>(
                 List.toArray(targets),
                 func(target) {
@@ -979,6 +1073,7 @@ module {
 
             let fetched = List.empty<Text>();
             let failed = List.empty<Text>();
+            let retired = List.empty<Text>();
             let ordered = List.toArray(targets);
             var index = 0;
             while (index < ordered.size()) {
@@ -1005,10 +1100,21 @@ module {
                             ),
                             now,
                         );
-                        ignore Directory.merge(mem, catalog.directory, self, now);
+                        Directory.noteReachable(mem, target, now);
                         List.add(fetched, Principal.toText(target));
                     };
-                    case null List.add(failed, Principal.toText(target));
+                    case null {
+                        // A catalogue read is one of the three calls a live peer
+                        // always answers, so a rejection here is evidence about
+                        // the peer rather than about the message. Unreadable
+                        // bytes are not: that call was answered.
+                        if (rejected(outcome)) {
+                            if (Directory.noteUnreachable(mem, target, now)) {
+                                List.add(retired, Principal.toText(target));
+                            };
+                        };
+                        List.add(failed, Principal.toText(target));
+                    };
                 };
                 index += 1;
             };
@@ -1016,6 +1122,7 @@ module {
             #ok({
                 fetched = List.toArray(fetched);
                 failed = List.toArray(failed);
+                retired = List.toArray(retired);
                 revision = mem.revision;
             });
         };
@@ -1057,7 +1164,6 @@ module {
                 request_id = proposal.request_id;
                 want_design_id = proposal.want_design_id;
                 offered = proposal.offered;
-                directory = Directory.share(mem, self, Directory.MAX_SHARE);
             };
             let reply = await* callRoute(
                 peer,
@@ -1158,14 +1264,12 @@ module {
         // --- Peer routes ------------------------------------------------------
 
         public func /*update*/chipswap_catalog_v1(
+            // Reading a catalogue no longer puts the reader in our directory.
+            // Browsing is not a relationship, and a designer who wants to be
+            // known to us can propose a trade, which is.
             request : PeerCatalogRequest,
-            /*caller*/ caller : Principal,
+            /*caller*/ _caller : Principal,
         ) : Blob {
-            let now = Time.now();
-            if (not Principal.equal(caller, self)) {
-                ignore Directory.note(mem, caller, #trade, now);
-                ignore Directory.merge(mem, request.directory, self, now);
-            };
             let designs = Array.map<Memory.Design, Wire.Design>(
                 Designs.published(mem),
                 func(design) {
@@ -1184,10 +1288,7 @@ module {
                 },
             );
             bump();
-            Wire.encodeCatalogReply({
-                designs;
-                directory = Directory.share(mem, self, Directory.MAX_SHARE);
-            });
+            Wire.encodeCatalogReply({ designs });
         };
 
         public func /*update*/chipswap_trade_v1(
@@ -1200,7 +1301,6 @@ module {
                     request_id = request.request_id;
                     want_design_id = request.want_design_id;
                     offered = request.offered;
-                    directory = request.directory;
                 },
                 caller,
                 self,
@@ -1220,7 +1320,6 @@ module {
                 case (#returned(chip)) #returned(chip);
                 case (#declined) #declined;
             };
-            ignore Directory.merge(mem, request.directory, self, now);
             let reply : Wire.DeliverReply = switch (
                 Trades.deliverInbound(mem, request.request_id, caller, outcome, now)
             ) {
@@ -1238,20 +1337,20 @@ module {
             Wire.encodeStatusReply(Trades.statusOf(mem, request.request_id, caller, self));
         };
 
-        public func /*update*/chipswap_announce_v1(
-            request : PeerAnnounceRequest,
-            /*caller*/ caller : Principal,
+        // One page of our directory, for a peer's crawl. This is a query: it
+        // reads, it cannot write, and so a crawl leaves no trace here and tells
+        // us nothing about who is crawling. That is the trade this route makes —
+        // it costs the caller no cycles and us no rate budget, and in exchange
+        // neither side learns anything from the other's curiosity.
+        public func /*query*/chipswap_directory_v1(
+            request : PeerDirectoryRequest,
+            /*caller*/ _caller : Principal,
         ) : Blob {
-            if (Principal.equal(caller, self)) {
-                return Wire.encodeAnnounceReply(#err({ code = "self_entry" }));
-            };
-            let now = Time.now();
-            ignore Directory.note(mem, caller, #announce, now);
-            ignore Directory.merge(mem, request.directory, self, now);
-            bump();
-            Wire.encodeAnnounceReply(
-                #ok({ directory = Directory.share(mem, self, Directory.MAX_SHARE) })
-            );
+            let limit = if (request.limit == 0 or request.limit > Wire.MAX_DIRECTORY_PAGE) {
+                Wire.MAX_DIRECTORY_PAGE;
+            } else request.limit;
+            let page = Directory.served(mem, self, request.offset, limit);
+            Wire.encodeDirectoryReply({ entries = page.entries; total = page.total });
         };
 
         // --- Internals ---------------------------------------------------------
@@ -1265,7 +1364,6 @@ module {
             let payload : PeerDeliverRequest = {
                 request_id = delivery.request_id;
                 outcome;
-                directory = Directory.share(mem, self, Directory.MAX_SHARE);
             };
             let reply = await* callRoute(
                 delivery.peer,
@@ -1316,6 +1414,36 @@ module {
                 case (#err(_)) null;
                 case (#ok(reply)) unwrapReply(reply, maxReplyBytes);
             };
+        };
+
+        func crawlView() : CrawlView {
+            let progress = Directory.crawlProgress(mem);
+            {
+                active = progress.active;
+                queried = progress.queried;
+                discovered = progress.discovered;
+                remaining = progress.remaining;
+                full = progress.full;
+            };
+        };
+
+        func rejected(result : ?NeutronCapabilities.BackendCallResultV1) : Bool {
+            switch (result) {
+                case (?#err(error)) Directory.strikeable(error.code);
+                case (_) false;
+            };
+        };
+
+        func directoryFromResult(
+            result : ?NeutronCapabilities.BackendCallResultV1
+        ) : ?Wire.DirectoryReply {
+            let ?outcome = result else return null;
+            let reply = switch (outcome) {
+                case (#err(_)) return null;
+                case (#ok(bytes)) bytes;
+            };
+            let ?payload = unwrapReply(reply, MAX_DIRECTORY_REPLY_BYTES) else return null;
+            Wire.decodeDirectoryReply(payload);
         };
 
         func catalogFromResult(
@@ -1720,6 +1848,9 @@ public type chipswap_directory_remove_Output = RevisionResult;
 public type chipswap_directory_set_ignored_Input = (request : IgnoreRequest);
 public type chipswap_directory_set_ignored_Output = RevisionResult;
 
+public type chipswap_directory_set_retired_Input = (request : RetireRequest);
+public type chipswap_directory_set_retired_Output = RevisionResult;
+
 public type chipswap_brush_save_Input = (request : SaveBrushRequest);
 public type chipswap_brush_save_Output = RevisionResult;
 
@@ -1729,8 +1860,14 @@ public type chipswap_brush_delete_Output = RevisionResult;
 public type chipswap_trade_forget_Input = (request : TradeRequestRef);
 public type chipswap_trade_forget_Output = RevisionResult;
 
-public type chipswap_announce_Input = (request : CanisterRequest);
-public type chipswap_announce_Output = RevisionResult;
+public type chipswap_crawl_start_Input = (());
+public type chipswap_crawl_start_Output = CrawlResult;
+
+public type chipswap_crawl_stop_Input = (());
+public type chipswap_crawl_stop_Output = CrawlResult;
+
+public type chipswap_crawl_step_Input = (());
+public type chipswap_crawl_step_Output = CrawlResult;
 
 public type chipswap_fetch_catalogs_Input = (request : FetchCatalogsRequest);
 public type chipswap_fetch_catalogs_Output = FetchCatalogsResult;
@@ -1759,8 +1896,8 @@ public type chipswap_deliver_v1_Output = Blob;
 public type chipswap_status_v1_Input = (request : PeerStatusRequest);
 public type chipswap_status_v1_Output = Blob;
 
-public type chipswap_announce_v1_Input = (request : PeerAnnounceRequest);
-public type chipswap_announce_v1_Output = Blob;
+public type chipswap_directory_v1_Input = (request : PeerDirectoryRequest);
+public type chipswap_directory_v1_Output = Blob;
 
 /*---NEUTRON GENERATED END---*/
 }

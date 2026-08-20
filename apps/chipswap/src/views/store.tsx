@@ -81,31 +81,39 @@ export const Store = ({ status, onChanged }: Props) => {
     setMessage(null);
     try {
       const directory = await loadDirectory(0, 100);
-      // The backend drops ignored designers too, but filtering here keeps them
-      // from consuming slots in a batch that is capped at eight.
+      // The backend drops these too, but filtering here keeps them from
+      // consuming slots in a batch that is capped at eight.
       const targets = directory.entries
-        .filter((entry) => !entry.ignored)
+        .filter((entry) => !entry.ignored && !entry.retired)
         .map((entry) => entry.canister);
       if (targets.length === 0) {
         setMessage(
           directory.total === 0
             ? "Add a designer in the Directory first."
-            : "Every designer in your directory is ignored.",
+            : "Every designer in your directory is ignored or retired.",
         );
         return;
       }
       let fetched = 0;
       let failed = 0;
+      let retired = 0;
       // The manifest caps one batch at eight peers, so walk the directory.
       for (let index = 0; index < targets.length; index += BATCH) {
         const slice = targets.slice(index, index + BATCH);
         const result = await fetchCatalogs(slice);
         fetched += result.fetched.length;
         failed += result.failed.length;
+        retired += result.retired.length;
       }
       setMessage(
         `Refreshed ${fetched} designer${fetched === 1 ? "" : "s"}` +
-          (failed > 0 ? `, ${failed} did not answer.` : "."),
+          (failed > 0 ? `, ${failed} did not answer` : "") +
+          // Said apart from "did not answer" because it is a different claim:
+          // those have now gone quiet often enough to look uninstalled, and
+          // nothing will call them again until the owner says otherwise.
+          (retired > 0
+            ? `, ${retired} marked retired after repeated silence.`
+            : "."),
       );
       await reload(filter, offset);
       await onChanged();

@@ -7,16 +7,18 @@ import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Migrate "../backend/memory/chipswap/v1_to_v2";
 import Migrate3 "../backend/memory/chipswap/v2_to_v3";
+import Migrate4 "../backend/memory/chipswap/v3_to_v4";
 import V1 "../backend/memory/chipswap/v1";
+import V3 "../backend/memory/chipswap/v3";
 
 // Migration from the released schemas, with something in every root. Compiling
 // proves the shapes line up; only this proves the values arrive intact and that
 // the trade mode became the requirement it stood for.
 //
-// The file walks both legs in order, because that is the upgrade a canister
-// still running version 1 actually performs: the kernel composes 1 -> 2 -> 3
-// into one atomic upgrade, so the second leg is fed exactly what the first
-// produced rather than a hand-built fixture.
+// The file walks all three legs in order, because that is the upgrade a
+// canister still running version 1 actually performs: the kernel composes
+// 1 -> 2 -> 3 -> 4 into one atomic upgrade, so each leg is fed exactly what the
+// one before it produced rather than a hand-built fixture.
 
 let designer = Principal.fromBlob(Blob.fromArray([0, 1, 1]));
 let peer = Principal.fromBlob(Blob.fromArray([0, 2, 1]));
@@ -376,3 +378,92 @@ assert (catalog3.designs[1].requirements.approval);
 let ?brush3 = List.get(migrated.brushes, 0) else Runtime.trap("missing brush");
 assert (brush3.name == "L");
 assert (brush3.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+
+// --- Third leg: 3 -> 4 -------------------------------------------------------
+
+// Two source variants disappear in V4, so the fixture needs one entry of each
+// before the leg runs. They are added to the V3 memory the second leg produced,
+// which is where a real canister would have them.
+let announcedPeer = Principal.fromBlob(Blob.fromArray([0, 3, 1]));
+let exchangedPeer = Principal.fromBlob(Blob.fromArray([0, 4, 1]));
+func v3Entry(canister : Principal, source : V3.DirectorySource) : V3.DirectoryEntry {
+    {
+        canister;
+        source;
+        first_seen_ns = 11;
+        last_seen_ns = 12;
+        announced = true;
+        ignored = false;
+        last_catalog_ns = null;
+        design_count = 0;
+    };
+};
+Map.add(migrated.directory, Principal.compare, announcedPeer, v3Entry(announcedPeer, #announce));
+Map.add(migrated.directory, Principal.compare, exchangedPeer, v3Entry(exchangedPeer, #exchange));
+// An ignored designer proves the flag crosses rather than being reset, which is
+// the one directory field a V3 owner could actually have set on purpose.
+let ?beforeIgnore = Map.get(migrated.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+Map.add(migrated.directory, Principal.compare, peer, { beforeIgnore with ignored = true });
+
+let current = Migrate4.migrate(migrated);
+
+// Every root crosses the third leg with the same contents.
+assert (current.revision == 12);
+assert (current.next_request_seq == 5);
+assert (current.next_brush_id == 3);
+assert (Map.size(current.designs) == 4);
+assert (Map.size(current.holdings) == 2);
+assert (Map.size(current.directory) == 3);
+assert (Map.size(current.catalog_cache) == 1);
+assert (Map.size(current.incoming) == 1);
+assert (Map.size(current.outgoing) == 1);
+assert (Map.size(current.replay) == 1);
+assert (List.size(current.brushes) == 1);
+
+// No crawl is in progress on an upgrade. There is nowhere for one to have been.
+switch (current.crawl) {
+    case null {};
+    case (?_) Runtime.trap("a crawl arrived from nowhere");
+};
+
+// The two departing sources get the successor that keeps the answer to the
+// question the field is read for: did the owner choose this designer? Neither
+// did, and neither does now.
+let ?announcedNow = Map.get(current.directory, Principal.compare, announcedPeer) else Runtime.trap("missing entry");
+assert (announcedNow.source == #trade);
+let ?exchangedNow = Map.get(current.directory, Principal.compare, exchangedPeer) else Runtime.trap("missing entry");
+assert (exchangedNow.source == #crawl);
+
+// A source the owner did choose is untouched, and so is the flag they set.
+let ?entry4 = Map.get(current.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+assert (entry4.source == #contacts);
+assert (entry4.ignored);
+assert (entry4.first_seen_ns == 5);
+assert (entry4.last_seen_ns == 6);
+assert (entry4.last_catalog_ns == ?7);
+assert (entry4.design_count == 2);
+
+// Nobody has been retired or has struck out before this version, so everyone
+// arrives with a clean record and a full three chances.
+for ((_, entry) in Map.entries(current.directory)) {
+    assert (not entry.retired);
+    assert (entry.strikes == 0);
+};
+
+// The drafts have now survived three conversions, and the trade in flight still
+// holds the chip it escrowed.
+let ?draft4 = Map.get(current.designs, Nat.compare, 3) else Runtime.trap("missing design");
+assert (draft4.state == #draft);
+assert (draft4.title == "Design 3");
+assert (draft4.requirements.approval);
+assert (draft4.art.pixels == Blob.fromArray([0, 1, 0]));
+let ?sent4 = Map.get(current.holdings, Text.compare, "sent") else Runtime.trap("missing chip");
+switch (sent4.state) {
+    case (#escrowed(details)) assert (details.request_id == requestId);
+    case (_) Runtime.trap("escrow was not preserved");
+};
+let ?replay4 = Map.get(current.replay, Text.compare, "replay") else Runtime.trap("missing replay");
+assert (replay4.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
+let ?brush4 = List.get(current.brushes, 0) else Runtime.trap("missing brush");
+assert (brush4.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));

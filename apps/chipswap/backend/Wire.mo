@@ -20,18 +20,20 @@ import Shape "./Shape";
 // allocation; and a decoder rejects trailing bytes so two different byte strings
 // can never mean the same message.
 //
-// One version is current and it is the only one read or written. The version
-// byte stays 2 because version 1 described a different layout for the same
-// message types, and letting the two share a number is the one thing the byte
-// exists to prevent: a message in the older layout is refused rather than
-// misread.
+// One version is current and it is the only one read or written. Version 3
+// removes the directory that used to ride along on a catalogue and a trade, and
+// replaces the announce message with a directory message that is asked for. A
+// message in an older layout is refused rather than misread, which is the one
+// thing the version byte exists to do.
 module {
     public let MAGIC : [Nat8] = [0x43, 0x53, 0x57, 0x31]; // CSW1
-    public let WIRE_VERSION : Nat8 = 2;
+    public let WIRE_VERSION : Nat8 = 3;
     public let MAX_MESSAGE_BYTES : Nat = 65_536;
 
     public let MAX_DESIGNS : Nat = 10;
-    public let MAX_DIRECTORY_SHARE : Nat = 32;
+    // One page of a directory reply. At 29 bytes a principal plus its length
+    // byte, a full page is 3840 bytes, inside the route's 8 KB ceiling.
+    public let MAX_DIRECTORY_PAGE : Nat = 128;
     public let MAX_TITLE_BYTES : Nat = 192;
     public let MAX_SHAPE_ID_BYTES : Nat = 32;
     public let MAX_CODE_BYTES : Nat = 64;
@@ -56,7 +58,7 @@ module {
     let TYPE_TRADE : Nat8 = 2;
     let TYPE_DELIVER : Nat8 = 3;
     let TYPE_STATUS : Nat8 = 4;
-    let TYPE_ANNOUNCE : Nat8 = 5;
+    let TYPE_DIRECTORY : Nat8 = 5;
 
     public type NsfwRule = { #disallowed; #required };
 
@@ -99,13 +101,12 @@ module {
 
     public type CatalogReply = {
         designs : [Design];
-        directory : [Principal];
     };
 
     public type TradeReply = {
-        #minted : { chip : Chip; directory : [Principal] };
-        #pending : { directory : [Principal] };
-        #declined : { reason : Text; directory : [Principal] };
+        #minted : { chip : Chip };
+        #pending;
+        #declined : { reason : Text };
         #err : { code : Text };
     };
 
@@ -121,9 +122,12 @@ module {
         #declined : { reason : Text };
     };
 
-    public type AnnounceReply = {
-        #ok : { directory : [Principal] };
-        #err : { code : Text };
+    // One page of a peer's directory. `total` is the whole eligible count, not
+    // the page length, so a caller knows whether to ask again without having to
+    // infer it from a short reply.
+    public type DirectoryReply = {
+        entries : [Principal];
+        total : Nat;
     };
 
     // --- Encoding ----------------------------------------------------------
@@ -133,7 +137,6 @@ module {
         let designs = capped<Design>(reply.designs, MAX_DESIGNS);
         appendU16(bytes, designs.size());
         for (design in designs.values()) appendDesign(bytes, design);
-        appendDirectory(bytes, reply.directory);
         finish(bytes);
     };
 
@@ -143,16 +146,11 @@ module {
             case (#minted(payload)) {
                 List.add(bytes, 0 : Nat8);
                 appendChip(bytes, payload.chip);
-                appendDirectory(bytes, payload.directory);
             };
-            case (#pending(payload)) {
-                List.add(bytes, 1 : Nat8);
-                appendDirectory(bytes, payload.directory);
-            };
+            case (#pending) List.add(bytes, 1 : Nat8);
             case (#declined(payload)) {
                 List.add(bytes, 2 : Nat8);
                 appendText(bytes, payload.reason, MAX_CODE_BYTES);
-                appendDirectory(bytes, payload.directory);
             };
             case (#err(payload)) {
                 List.add(bytes, 3 : Nat8);
@@ -191,18 +189,12 @@ module {
         finish(bytes);
     };
 
-    public func encodeAnnounceReply(reply : AnnounceReply) : Blob {
-        let bytes = header(TYPE_ANNOUNCE);
-        switch (reply) {
-            case (#ok(payload)) {
-                List.add(bytes, 0 : Nat8);
-                appendDirectory(bytes, payload.directory);
-            };
-            case (#err(payload)) {
-                List.add(bytes, 1 : Nat8);
-                appendText(bytes, payload.code, MAX_CODE_BYTES);
-            };
-        };
+    public func encodeDirectoryReply(reply : DirectoryReply) : Blob {
+        let bytes = header(TYPE_DIRECTORY);
+        let page = capped<Principal>(reply.entries, MAX_DIRECTORY_PAGE);
+        appendU16(bytes, page.size());
+        for (entry in page.values()) appendPrincipal(bytes, entry);
+        appendU32(bytes, reply.total);
         finish(bytes);
     };
 
@@ -221,9 +213,8 @@ module {
             };
             index += 1;
         };
-        let directory = readDirectory(reader);
         if (not reader.done()) return null;
-        ?{ designs = List.toArray(designs); directory };
+        ?{ designs = List.toArray(designs) };
     };
 
     public func decodeTradeReply(message : Blob) : ?TradeReply {
@@ -232,13 +223,10 @@ module {
         let reply : TradeReply = switch (variant) {
             case (0) {
                 let ?chip = readChip(reader) else return null;
-                { chip; directory = readDirectory(reader) } |> #minted(_);
+                #minted({ chip });
             };
-            case (1) #pending({ directory = readDirectory(reader) });
-            case (2) {
-                let reason = reader.text(MAX_CODE_BYTES);
-                #declined({ reason; directory = readDirectory(reader) });
-            };
+            case (1) #pending;
+            case (2) #declined({ reason = reader.text(MAX_CODE_BYTES) });
             case (3) #err({ code = reader.text(MAX_CODE_BYTES) });
             case (_) return null;
         };
@@ -273,15 +261,22 @@ module {
         ?reply;
     };
 
-    public func decodeAnnounceReply(message : Blob) : ?AnnounceReply {
-        let ?reader = open(message, TYPE_ANNOUNCE) else return null;
-        let reply : AnnounceReply = switch (reader.u8()) {
-            case (0) #ok({ directory = readDirectory(reader) });
-            case (1) #err({ code = reader.text(MAX_CODE_BYTES) });
-            case (_) return null;
+    public func decodeDirectoryReply(message : Blob) : ?DirectoryReply {
+        let ?reader = open(message, TYPE_DIRECTORY) else return null;
+        let count = reader.u16();
+        if (count > MAX_DIRECTORY_PAGE) return null;
+        let entries = List.empty<Principal>();
+        var index = 0;
+        while (index < count and reader.ok()) {
+            List.add(entries, reader.principal());
+            index += 1;
         };
-        if (not reader.done()) return null;
-        ?reply;
+        let total = reader.u32();
+        if (not reader.ok() or not reader.done()) return null;
+        // A page longer than the whole is a peer describing something that
+        // cannot exist, and paging on it would never terminate.
+        if (List.size(entries) > total) return null;
+        ?{ entries = List.toArray(entries); total };
     };
 
     // --- Writers -----------------------------------------------------------
@@ -349,12 +344,6 @@ module {
         let length = if (raw.size() <= MAX_PRINCIPAL_BYTES) raw.size() else 0;
         appendU8(bytes, length);
         if (length > 0) for (byte in raw.values()) List.add(bytes, byte);
-    };
-
-    func appendDirectory(bytes : List.List<Nat8>, entries : [Principal]) {
-        let sample = capped<Principal>(entries, MAX_DIRECTORY_SHARE);
-        appendU16(bytes, sample.size());
-        for (entry in sample.values()) appendPrincipal(bytes, entry);
     };
 
     func appendArt(bytes : List.List<Nat8>, art : Art) {
@@ -529,22 +518,6 @@ module {
         let reader = Reader(bytes);
         ignore reader.raw(MAGIC.size() + 2);
         ?reader;
-    };
-
-    func readDirectory(reader : Reader) : [Principal] {
-        let count = reader.u16();
-        if (count > MAX_DIRECTORY_SHARE) {
-            reader.fail();
-            return [];
-        };
-        let entries = List.empty<Principal>();
-        var index = 0;
-        while (index < count and reader.ok()) {
-            List.add(entries, reader.principal());
-            index += 1;
-        };
-        if (not reader.ok()) return [];
-        List.toArray(entries);
     };
 
     func readArt(reader : Reader) : ?Art {

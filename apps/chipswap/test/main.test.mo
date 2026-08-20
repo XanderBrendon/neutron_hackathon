@@ -5,7 +5,7 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Chipswap "../backend/main";
-import Memory "../backend/memory/chipswap/v3";
+import Memory "../backend/memory/chipswap/v4";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
 
@@ -159,7 +159,7 @@ switch (
 };
 
 // A peer asks for the catalog: only published designs travel, in CSW1 form.
-let catalogBytes = chipswap.chipswap_catalog_v1({ directory = [] }, peer);
+let catalogBytes = chipswap.chipswap_catalog_v1({}, peer);
 let ?catalog = Wire.decodeCatalogReply(catalogBytes) else Runtime.trap("catalog decode");
 assert (catalog.designs.size() == 1);
 assert (catalog.designs[0].design_id == 1);
@@ -192,7 +192,6 @@ let tradeBytes = chipswap.chipswap_trade_v1(
         request_id = requestId;
         want_design_id = 1;
         offered;
-        directory = [];
     },
     peer,
 );
@@ -216,11 +215,20 @@ assert (collection.chips[0].serial == 8);
 let directory = chipswap.chipswap_directory({ offset = 0; limit = 10 });
 assert (directory.total == 1);
 assert (directory.entries[0].canister == Principal.toText(peer));
-assert (directory.entries[0].announced == false);
+assert (directory.entries[0].source == "trade");
+assert (directory.entries[0].retired == false);
+assert (directory.entries[0].strikes == 0);
+
+// Reading our catalogue does not put the reader here. Browsing is not a
+// relationship; proposing a trade is, which is why the peer above is listed and
+// this one is not.
+let browser = Principal.fromBlob(Blob.fromArray([0, 4, 4, 1]));
+ignore chipswap.chipswap_catalog_v1({}, browser);
+assert (chipswap.chipswap_directory({ offset = 0; limit = 10 }).total == 1);
 
 // Replaying the same request returns the same chip without minting again.
 let replayBytes = chipswap.chipswap_trade_v1(
-    { request_id = requestId; want_design_id = 1; offered; directory = [] },
+    { request_id = requestId; want_design_id = 1; offered },
     peer,
 );
 let ?replayReply = Wire.decodeTradeReply(replayBytes) else Runtime.trap("replay decode");
@@ -241,26 +249,37 @@ switch (statusReply) {
 let otherBytes = chipswap.chipswap_status_v1({ request_id = requestId }, self);
 assert (Wire.decodeStatusReply(otherBytes) == ?#unknown);
 
-// Announcing adds the caller and returns a directory sample.
-let announceBytes = chipswap.chipswap_announce_v1({ directory = [] }, peer);
-let ?announceReply = Wire.decodeAnnounceReply(announceBytes) else Runtime.trap("announce decode");
-switch (announceReply) {
-    case (#ok(_)) {};
-    case (#err(error)) Runtime.trap("announce: " # error.code);
-};
-// A Neutron never announces itself into its own directory.
-let selfAnnounce = chipswap.chipswap_announce_v1({ directory = [] }, self);
-switch (Wire.decodeAnnounceReply(selfAnnounce)) {
-    case (?#err(payload)) assert (payload.code == "self_entry");
-    case (_) Runtime.trap("expected self_entry");
-};
+// A peer crawls us: one page of the designers we know, with the total so they
+// can tell whether to ask again.
+let pageBytes = chipswap.chipswap_directory_v1({ offset = 0; limit = 10 }, peer);
+let ?pageReply = Wire.decodeDirectoryReply(pageBytes) else Runtime.trap("directory decode");
+assert (pageReply.total == 1);
+assert (pageReply.entries[0] == peer);
+
+// A limit of zero, or one past the cap, is answered with the cap rather than
+// with nothing: a caller who asks badly still gets a usable page.
+let cappedBytes = chipswap.chipswap_directory_v1({ offset = 0; limit = 0 }, peer);
+let ?cappedReply = Wire.decodeDirectoryReply(cappedBytes) else Runtime.trap("capped decode");
+assert (cappedReply.entries.size() == 1);
+let hugeBytes = chipswap.chipswap_directory_v1({ offset = 0; limit = 100_000 }, peer);
+let ?hugeReply = Wire.decodeDirectoryReply(hugeBytes) else Runtime.trap("huge decode");
+assert (hugeReply.entries.size() == 1);
+
+// Past the end is an empty page rather than a refusal, which is how a crawler
+// learns it has finished.
+let pastBytes = chipswap.chipswap_directory_v1({ offset = 50; limit = 10 }, peer);
+let ?pastReply = Wire.decodeDirectoryReply(pastBytes) else Runtime.trap("past decode");
+assert (pastReply.entries.size() == 0);
+assert (pastReply.total == 1);
+
+// We never hand anyone our own address.
+for (candidate in pageReply.entries.values()) assert (candidate != self);
 
 // A delivery for a trade we never proposed is refused.
 let deliverBytes = chipswap.chipswap_deliver_v1(
     {
         request_id = requestId;
         outcome = #declined;
-        directory = [];
     },
     peer,
 );

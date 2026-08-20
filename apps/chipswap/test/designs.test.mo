@@ -5,7 +5,7 @@ import Nat32 "mo:core/Nat32";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Designs "../backend/Designs";
-import Memory "../backend/memory/chipswap/v3";
+import Memory "../backend/memory/chipswap/v4";
 import Requirements "../backend/Requirements";
 import Shape "../backend/Shape";
 

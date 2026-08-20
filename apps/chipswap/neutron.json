@@ -2,7 +2,7 @@
   "format": 3,
   "name": "Chipswap",
   "id": "chipswap",
-  "version": 107,
+  "version": 108,
   "update_source": "233tv-xiaaa-aaaay-aacta-cai",
   "description": "Design, publish, and trade pixel chips between Neutron canisters",
   "src": "main.mo",
@@ -86,15 +86,12 @@
         },
         {
           "protocol": "chipswap_v1",
-          "id": "announce",
-          "handler": "chipswap_announce_v1",
-          "mode": "update",
+          "id": "directory",
+          "handler": "chipswap_directory_v1",
+          "mode": "query",
           "caller": "canister",
-          "max_request_bytes": 4096,
-          "max_response_bytes": 4096,
-          "max_calls_per_hour": 240,
-          "max_calls_per_caller_per_hour": 60,
-          "required_cycles": 200000000
+          "max_request_bytes": 1024,
+          "max_response_bytes": 8192
         }
       ]
     },
@@ -118,15 +115,18 @@
         "chipswap_directory_add",
         "chipswap_directory_remove",
         "chipswap_directory_set_ignored",
+        "chipswap_directory_set_retired",
         "chipswap_brush_save",
         "chipswap_brush_delete",
         "chipswap_trade_forget",
-        "chipswap_announce",
         "chipswap_fetch_catalogs",
         "chipswap_trade_propose",
         "chipswap_trade_resolve",
         "chipswap_trade_accept",
-        "chipswap_trade_decline"
+        "chipswap_trade_decline",
+        "chipswap_crawl_start",
+        "chipswap_crawl_step",
+        "chipswap_crawl_stop"
       ]
     },
     "backend_calls": {
@@ -139,6 +139,10 @@
         {
           "kind": "method",
           "method": "app_chipswap__chipswap_v1_update"
+        },
+        {
+          "kind": "method",
+          "method": "app_chipswap__chipswap_v1_query"
         }
       ],
       "max_concurrency": 8,
@@ -215,6 +219,10 @@
       "type": "update",
       "async": false
     },
+    "chipswap_directory_set_retired": {
+      "type": "update",
+      "async": false
+    },
     "chipswap_brush_save": {
       "type": "update",
       "async": false
@@ -227,7 +235,15 @@
       "type": "update",
       "async": false
     },
-    "chipswap_announce": {
+    "chipswap_crawl_start": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_crawl_stop": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_crawl_step": {
       "type": "update",
       "async": "async*"
     },
@@ -279,8 +295,8 @@
         "caller"
       ]
     },
-    "chipswap_announce_v1": {
-      "type": "update",
+    "chipswap_directory_v1": {
+      "type": "query",
       "async": false,
       "arg": [
         "caller"
@@ -289,7 +305,7 @@
   },
   "memory": {
     "chipswap": {
-      "version": 3,
+      "version": 4,
       "schemas": {
         "1": {
           "src": "memory/chipswap/v1.mo"
@@ -299,6 +315,9 @@
         },
         "3": {
           "src": "memory/chipswap/v3.mo"
+        },
+        "4": {
+          "src": "memory/chipswap/v4.mo"
         }
       },
       "migrations": [
@@ -311,6 +330,11 @@
           "from": 2,
           "to": 3,
           "src": "memory/chipswap/v2_to_v3.mo"
+        },
+        {
+          "from": 3,
+          "to": 4,
+          "src": "memory/chipswap/v3_to_v4.mo"
         }
       ]
     }

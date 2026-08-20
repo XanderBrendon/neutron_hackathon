@@ -74,7 +74,7 @@ func extended(blob : Blob, extra : Nat) : Blob {
 
 // --- Catalog ---------------------------------------------------------------
 
-let catalog : Wire.CatalogReply = { designs = [design]; directory };
+let catalog : Wire.CatalogReply = { designs = [design] };
 let catalogBytes = Wire.encodeCatalogReply(catalog);
 let ?decodedCatalog = Wire.decodeCatalogReply(catalogBytes) else Runtime.trap("catalog decode");
 assert (decodedCatalog.designs.size() == 1);
@@ -87,16 +87,14 @@ assert (decodedCatalog.designs[0].published_at_ns == 1_600_000_000_000_000_000);
 assert (decodedCatalog.designs[0].art.palette == art.palette);
 assert (decodedCatalog.designs[0].art.pixels == art.pixels);
 assert (decodedCatalog.designs[0].art.shape_id == Shape.SHAPE_ID);
-assert (decodedCatalog.directory == directory);
 
-let emptyCatalog = Wire.encodeCatalogReply({ designs = []; directory = [] });
+let emptyCatalog = Wire.encodeCatalogReply({ designs = [] });
 let ?decodedEmpty = Wire.decodeCatalogReply(emptyCatalog) else Runtime.trap("empty catalog");
 assert (decodedEmpty.designs.size() == 0);
-assert (decodedEmpty.directory.size() == 0);
 
 // --- Trade -----------------------------------------------------------------
 
-let minted : Wire.TradeReply = #minted({ chip; directory });
+let minted : Wire.TradeReply = #minted({ chip });
 let mintedBytes = Wire.encodeTradeReply(minted);
 let ?decodedMinted = Wire.decodeTradeReply(mintedBytes) else Runtime.trap("minted decode");
 switch (decodedMinted) {
@@ -109,26 +107,19 @@ switch (decodedMinted) {
         assert (payload.chip.design_revision == 7);
         assert (payload.chip.minted_at_ns == 1_700_000_000_000_000_000);
         assert (payload.chip.art.pixels == art.pixels);
-        assert (payload.directory == directory);
     };
     case (_) Runtime.trap("expected minted");
 };
 
-let ?decodedPending = Wire.decodeTradeReply(Wire.encodeTradeReply(#pending({ directory })))
+let ?decodedPending = Wire.decodeTradeReply(Wire.encodeTradeReply(#pending))
 else Runtime.trap("pending decode");
-switch (decodedPending) {
-    case (#pending(payload)) assert (payload.directory == directory);
-    case (_) Runtime.trap("expected pending");
-};
+assert (decodedPending == #pending);
 
 let ?decodedDeclined = Wire.decodeTradeReply(
-    Wire.encodeTradeReply(#declined({ reason = "trade_mode"; directory = [] }))
+    Wire.encodeTradeReply(#declined({ reason = "trade_mode" }))
 ) else Runtime.trap("declined decode");
 switch (decodedDeclined) {
-    case (#declined(payload)) {
-        assert (payload.reason == "trade_mode");
-        assert (payload.directory.size() == 0);
-    };
+    case (#declined(payload)) assert (payload.reason == "trade_mode");
     case (_) Runtime.trap("expected declined");
 };
 
@@ -139,7 +130,7 @@ switch (decodedTradeErr) {
     case (_) Runtime.trap("expected err");
 };
 
-// --- Deliver, status, announce ---------------------------------------------
+// --- Deliver, status, directory --------------------------------------------
 
 let ?deliverOk = Wire.decodeDeliverReply(Wire.encodeDeliverReply(#ok)) else Runtime.trap("deliver ok");
 assert (deliverOk == #ok);
@@ -167,18 +158,35 @@ switch (statusDeclined) {
     case (_) Runtime.trap("expected declined");
 };
 
-let ?announceOk = Wire.decodeAnnounceReply(Wire.encodeAnnounceReply(#ok({ directory })))
-else Runtime.trap("announce");
-switch (announceOk) {
-    case (#ok(payload)) assert (payload.directory == directory);
-    case (_) Runtime.trap("expected ok");
-};
-let ?announceErr = Wire.decodeAnnounceReply(Wire.encodeAnnounceReply(#err({ code = "busy" })))
-else Runtime.trap("announce err");
-switch (announceErr) {
-    case (#err(payload)) assert (payload.code == "busy");
-    case (_) Runtime.trap("expected err");
-};
+// A directory page carries the peer's whole eligible count alongside the slice
+// they sent, so a crawler knows whether to ask again without inferring it from
+// a short reply.
+let directoryBytes = Wire.encodeDirectoryReply({ entries = directory; total = 9 });
+let ?decodedDirectory = Wire.decodeDirectoryReply(directoryBytes)
+else Runtime.trap("directory decode");
+assert (decodedDirectory.entries == directory);
+assert (decodedDirectory.total == 9);
+
+let ?emptyDirectory = Wire.decodeDirectoryReply(
+    Wire.encodeDirectoryReply({ entries = []; total = 0 })
+) else Runtime.trap("empty directory");
+assert (emptyDirectory.entries.size() == 0);
+assert (emptyDirectory.total == 0);
+
+// A full page is inside the route's response ceiling with room to spare.
+let fullPage = Wire.encodeDirectoryReply({
+    entries = Array.tabulate<Principal>(Wire.MAX_DIRECTORY_PAGE, func(_) { alice });
+    total = Wire.MAX_DIRECTORY_PAGE;
+});
+assert (bytesOf(fullPage).size() <= 8_192);
+let ?decodedFull = Wire.decodeDirectoryReply(fullPage) else Runtime.trap("full page");
+assert (decodedFull.entries.size() == Wire.MAX_DIRECTORY_PAGE);
+
+// A page longer than the total it claims describes something that cannot exist,
+// and a crawler paging on it would never reach the end.
+assert (Wire.decodeDirectoryReply(
+    Wire.encodeDirectoryReply({ entries = directory; total = 1 })
+) == null);
 
 // --- A design that asks for nothing ----------------------------------------
 
@@ -194,20 +202,19 @@ let openDesign : Wire.Design = {
     };
     nsfw = false;
 };
-let openBytes = Wire.encodeCatalogReply({ designs = [openDesign]; directory = [] });
+let openBytes = Wire.encodeCatalogReply({ designs = [openDesign] });
 let ?decodedOpen = Wire.decodeCatalogReply(openBytes) else Runtime.trap("open catalog");
 assert (decodedOpen.designs[0].requirements == openDesign.requirements);
 assert (not decodedOpen.designs[0].nsfw);
 // Two bytes shorter than the message above: one flags byte with nothing set,
 // where the other carried a colour minimum and a coverage cap as well.
 assert (bytesOf(openBytes).size() + 2 == bytesOf(
-    Wire.encodeCatalogReply({ designs = [design]; directory = [] })
+    Wire.encodeCatalogReply({ designs = [design] })
 ).size());
 
 // A rule of `#required` encodes and reads back as itself, not as its opposite.
 let requiring = Wire.encodeCatalogReply({
     designs = [{ design with requirements = { requirements with nsfw = ? #required } }];
-    directory = [];
 });
 let ?decodedRequiring = Wire.decodeCatalogReply(requiring) else Runtime.trap("required catalog");
 assert (decodedRequiring.designs[0].requirements.nsfw == ? #required);
@@ -220,8 +227,12 @@ assert (Wire.decodeCatalogReply(Blob.fromArray([0x43, 0x53, 0x57])) == null);
 assert (Wire.decodeCatalogReply(withByte(catalogBytes, 0, 0x44)) == null);
 assert (Wire.decodeCatalogReply(withByte(catalogBytes, 5, 9)) == null);
 assert (Wire.decodeCatalogReply(withByte(catalogBytes, 4, 9)) == null);
-// One version is current. The older layout described the same message types
-// differently, so a message claiming it is refused rather than read as this one.
+// One version is current. Both older layouts described the same message types
+// differently, so a message claiming either is refused rather than read as this
+// one — version 2 in particular carried a directory this one does not.
+assert (Wire.decodeCatalogReply(withByte(catalogBytes, 5, 2)) == null);
+assert (Wire.decodeTradeReply(withByte(mintedBytes, 5, 2)) == null);
+assert (Wire.decodeDirectoryReply(withByte(directoryBytes, 5, 2)) == null);
 assert (Wire.decodeCatalogReply(withByte(catalogBytes, 5, 1)) == null);
 assert (Wire.decodeTradeReply(withByte(mintedBytes, 5, 1)) == null);
 assert (Wire.decodeCatalogReply(withByte(catalogBytes, 5, 0)) == null);
@@ -230,6 +241,15 @@ assert (Wire.decodeCatalogReply(withByte(catalogBytes, 5, 0)) == null);
 assert (Wire.decodeTradeReply(catalogBytes) == null);
 assert (Wire.decodeCatalogReply(mintedBytes) == null);
 assert (Wire.decodeStatusReply(mintedBytes) == null);
+assert (Wire.decodeDirectoryReply(catalogBytes) == null);
+assert (Wire.decodeCatalogReply(directoryBytes) == null);
+
+// A directory page is refused on the same terms as every other message:
+// truncated, extended, or declaring more entries than the cap allows.
+assert (Wire.decodeDirectoryReply(truncated(directoryBytes, 8)) == null);
+assert (Wire.decodeDirectoryReply(extended(directoryBytes, 1)) == null);
+let overEntries = withByte(withByte(directoryBytes, 6, 1), 7, 0); // 256 > 128
+assert (Wire.decodeDirectoryReply(overEntries) == null);
 
 // Truncation at every prefix is rejected rather than trusted.
 var cut = 1;

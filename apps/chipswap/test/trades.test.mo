@@ -8,7 +8,7 @@ import Text "mo:core/Text";
 import Designs "../backend/Designs";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v3";
+import Memory "../backend/memory/chipswap/v4";
 import Shape "../backend/Shape";
 import Trades "../backend/Trades";
 import Wire "../backend/Wire";
@@ -80,7 +80,7 @@ func designerMemory(autoMode : Bool) : Memory.Mem {
 };
 
 func inbound(id : Blob, designId : Nat, chip : Wire.Chip) : Trades.InboundTrade {
-    { request_id = id; want_design_id = designId; offered = chip; directory = [carol] };
+    { request_id = id; want_design_id = designId; offered = chip };
 };
 
 // --- Auto mode: mint and return in the same reply -------------------------
@@ -95,15 +95,15 @@ switch (autoReply) {
         assert (payload.chip.design_id == 1);
         assert (payload.chip.serial == 1);
         assert (payload.chip.minted_at_ns == 100);
-        assert (payload.directory.size() >= 1);
     };
     case (_) Runtime.trap("expected minted");
 };
-// Their chip is ours now, and the peer plus their shared directory are known.
+// Their chip is ours now, and the peer is known. Only the peer: a proposal
+// carries no directory any more, so carol arrives only if we go and look.
 assert (Holdings.count(auto) == 1);
 assert (Holdings.get(auto, Holdings.key({ designer = bob; design_id = 4; serial = 9 })) != null);
 assert (Directory.get(auto, bob) != null);
-assert (Directory.get(auto, carol) != null);
+assert (Directory.get(auto, carol) == null);
 assert (Map.size(auto.replay) == 1);
 
 // Replaying the exact request returns the stored outcome and mints nothing new.
@@ -508,7 +508,7 @@ assert (
         Trades.finishPropose(
             proposer,
             heldProposal.request_id,
-            ?#minted({ chip = mintedBack; directory = [carol] }),
+            ?#minted({ chip = mintedBack }),
             bob,
             210,
         )
@@ -524,7 +524,7 @@ let pendingProposal = expectOk(
 );
 assert (
     expectOk(
-        Trades.finishPropose(proposer, pendingProposal.request_id, ?#pending({ directory = [] }), bob, 230)
+        Trades.finishPropose(proposer, pendingProposal.request_id, ?#pending, bob, 230)
     ) == "pending"
 );
 
@@ -539,7 +539,7 @@ assert (
         Trades.finishPropose(
             proposer,
             declinedProposal.request_id,
-            ?#declined({ reason = "trade_mode"; directory = [] }),
+            ?#declined({ reason = "trade_mode" }),
             bob,
             250,
         )
@@ -572,7 +572,7 @@ assert (Holdings.spendable(proposer, restoreKey));
 let awaiting = expectOk(
     Trades.beginPropose(proposer, { peer = alice; want_design_id = 1; offer = #held(restoreKey) }, bob, 300)
 );
-assert (expectOk(Trades.finishPropose(proposer, awaiting.request_id, ?#pending({ directory = [] }), bob, 310)) == "pending");
+assert (expectOk(Trades.finishPropose(proposer, awaiting.request_id, ?#pending, bob, 310)) == "pending");
 
 let delivered : Wire.Chip = {
     designer = alice;
@@ -613,7 +613,7 @@ let returning = expectOk(
         360,
     )
 );
-assert (expectOk(Trades.finishPropose(proposer, returning.request_id, ?#pending({ directory = [] }), bob, 370)) == "pending");
+assert (expectOk(Trades.finishPropose(proposer, returning.request_id, ?#pending, bob, 370)) == "pending");
 assert (
     expectOk(
         Trades.deliverInbound(proposer, returning.request_id, alice, #returned(returning.offered), 380)
@@ -712,3 +712,57 @@ while (scan < sorted.size()) {
     assert (sorted[scan - 1] != sorted[scan]);
     scan += 1;
 };
+
+// --- A retired designer who turns out to be alive ---------------------------
+
+// Retirement is a conclusion drawn from calls that went unanswered, and a trade
+// proposal disproves it outright: whatever we concluded, they are running
+// Chipswap and they just reached us. The chips we already hold from them are
+// untouched either way — a chip is copied at the trade, not fetched later.
+let reviving = designerMemory(true);
+ignore Directory.note(reviving, bob, #manual, 1);
+assert (Directory.noteUnreachable(reviving, bob, 2) == false);
+assert (Directory.noteUnreachable(reviving, bob, 3) == false);
+assert (Directory.noteUnreachable(reviving, bob, 4));
+assert (Directory.retired(reviving, bob));
+
+let revivalRequest = requestId(90);
+switch (
+    Trades.acceptInbound(
+        reviving,
+        inbound(revivalRequest, 1, offeredChip(bob, 4, 21)),
+        bob,
+        alice,
+        400,
+    )
+) {
+    case (#minted(_)) {};
+    case (_) Runtime.trap("expected minted");
+};
+assert (Directory.retired(reviving, bob) == false);
+let ?revived = Directory.get(reviving, bob) else Runtime.trap("missing entry");
+assert (revived.strikes == 0);
+assert (revived.last_seen_ns == 400);
+// The designer was chosen by hand, and a revival does not rewrite that.
+assert (revived.source == #manual);
+assert (Holdings.count(reviving) == 1);
+
+// Ignoring is the owner's instruction, not a conclusion, so nothing a peer does
+// withdraws it. A proposal from an ignored designer is still answered — refusing
+// to trade is a different decision from refusing to hear about them.
+let ignoringPeer = designerMemory(true);
+ignore Directory.note(ignoringPeer, bob, #manual, 1);
+assert (Directory.setIgnored(ignoringPeer, bob, true));
+switch (
+    Trades.acceptInbound(
+        ignoringPeer,
+        inbound(requestId(91), 1, offeredChip(bob, 4, 22)),
+        bob,
+        alice,
+        410,
+    )
+) {
+    case (#minted(_)) {};
+    case (_) Runtime.trap("expected minted");
+};
+assert (Directory.ignored(ignoringPeer, bob));

@@ -75,6 +75,7 @@ export type Status = {
   catalogDesigners: number;
   incomingPending: number;
   outgoingActive: number;
+  crawl: CrawlProgress;
   shapeId: string;
   pixelCount: number;
   rowWidths: number[];
@@ -87,12 +88,24 @@ export type DirectoryEntry = {
   source: string;
   firstSeenNs: string;
   lastSeenNs: string;
-  announced: boolean;
   ignored: boolean;
+  retired: boolean;
+  strikes: number;
   lastCatalogNs: string | null;
   designCount: number;
   ownsChip: boolean;
   contactName: string | null;
+};
+
+// `remaining` counts designers this crawl has still to ask, so the tile can say
+// how much is left rather than only how much is done. `full` says the directory
+// hit its ceiling and further discoveries are being dropped.
+export type CrawlProgress = {
+  active: boolean;
+  queried: number;
+  discovered: number;
+  remaining: number;
+  full: boolean;
 };
 
 export type StoreRow = {
@@ -359,6 +372,7 @@ export function parseStatus(value: unknown): Status {
     catalogDesigners: natNumber(source.catalog_designers, "catalog designers"),
     incomingPending: natNumber(source.incoming_pending, "incoming pending"),
     outgoingActive: natNumber(source.outgoing_active, "outgoing active"),
+    crawl: parseCrawlProgress(source.crawl),
     shapeId: text(source.shape_id, "shape id"),
     pixelCount: natNumber(source.pixel_count, "pixel count"),
     rowWidths: rowWidths.map((entry) => natNumber(entry, "row width")),
@@ -374,12 +388,24 @@ export function parseDirectoryEntry(value: unknown): DirectoryEntry {
     source: text(source.source, "directory source"),
     firstSeenNs: nsText(source.first_seen_ns, "first seen"),
     lastSeenNs: nsText(source.last_seen_ns, "last seen"),
-    announced: bool(source.announced, "announced flag"),
     ignored: bool(source.ignored, "ignored flag"),
+    retired: bool(source.retired, "retired flag"),
+    strikes: natNumber(source.strikes, "strike count"),
     lastCatalogNs: optionalNs(source.last_catalog_ns, "last catalog"),
     designCount: natNumber(source.design_count, "design count"),
     ownsChip: bool(source.owns_chip, "ownership flag"),
     contactName: optionalText(source.contact_name, "contact name"),
+  };
+}
+
+export function parseCrawlProgress(value: unknown): CrawlProgress {
+  const source = record(value, "crawl progress");
+  return {
+    active: bool(source.active, "crawl activity"),
+    queried: natNumber(source.queried, "queried count"),
+    discovered: natNumber(source.discovered, "discovered count"),
+    remaining: natNumber(source.remaining, "remaining count"),
+    full: bool(source.full, "directory full flag"),
   };
 }
 
@@ -703,8 +729,8 @@ export async function removeDirectoryEntry(canister: string): Promise<number> {
 }
 
 // An ignored designer stays in the directory, so this is a flag on an entry
-// rather than a removal: forgetting them would let the next exchange put them
-// back with no memory of the decision.
+// rather than a removal: forgetting them would let the next crawl put them back
+// with no memory of the decision.
 export async function setDirectoryIgnored(
   canister: string,
   ignored: boolean,
@@ -712,6 +738,20 @@ export async function setDirectoryIgnored(
   return parseRevision(
     await updateSelf("chipswap_directory_set_ignored", [
       { canister, ignored },
+    ] as unknown as JsonValue[]),
+  );
+}
+
+// Retirement is a conclusion the canister drew from calls that went unanswered.
+// The owner may set it or clear it: clear it for a designer whose canister was
+// only stopped, set it for one they know is gone.
+export async function setDirectoryRetired(
+  canister: string,
+  retired: boolean,
+): Promise<number> {
+  return parseRevision(
+    await updateSelf("chipswap_directory_set_retired", [
+      { canister, retired },
     ] as unknown as JsonValue[]),
   );
 }
@@ -756,15 +796,30 @@ export async function forgetTrade(requestId: string): Promise<number> {
   );
 }
 
-export async function announceTo(canister: string): Promise<number> {
-  return parseRevision(
-    await updateSelf("chipswap_announce", [{ canister }] as unknown as JsonValue[]),
+// A crawl runs in rounds the tile drives, so that a long one shows its progress
+// and can be stopped. Starting clears any earlier crawl: one that finished has
+// visited everyone, and continuing it would do nothing.
+export async function startCrawl(): Promise<CrawlProgress> {
+  return parseCrawlProgress(
+    unwrap(await updateSelf("chipswap_crawl_start", NO_ARGUMENT), "crawl start"),
+  );
+}
+
+export async function crawlStep(): Promise<CrawlProgress> {
+  return parseCrawlProgress(
+    unwrap(await updateSelf("chipswap_crawl_step", NO_ARGUMENT), "crawl step"),
+  );
+}
+
+export async function stopCrawl(): Promise<CrawlProgress> {
+  return parseCrawlProgress(
+    unwrap(await updateSelf("chipswap_crawl_stop", NO_ARGUMENT), "crawl stop"),
   );
 }
 
 export async function fetchCatalogs(
   canisters: string[],
-): Promise<{ fetched: string[]; failed: string[] }> {
+): Promise<{ fetched: string[]; failed: string[]; retired: string[] }> {
   const value = unwrap(
     await updateSelf("chipswap_fetch_catalogs", [
       { canisters },
@@ -776,6 +831,9 @@ export async function fetchCatalogs(
       text(entry, "canister id"),
     ),
     failed: list(value.failed, "failed list").map((entry) =>
+      text(entry, "canister id"),
+    ),
+    retired: list(value.retired, "retired list").map((entry) =>
       text(entry, "canister id"),
     ),
   };

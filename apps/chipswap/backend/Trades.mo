@@ -10,7 +10,7 @@ import Text "mo:core/Text";
 import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v3";
+import Memory "./memory/chipswap/v4";
 import Requirements "./Requirements";
 import Shape "./Shape";
 import Wire "./Wire";
@@ -53,7 +53,6 @@ module {
         request_id : Blob;
         want_design_id : Nat;
         offered : Wire.Chip;
-        directory : [Principal];
     };
 
     public type DeliverOutcome = {
@@ -230,16 +229,13 @@ module {
 
         switch (answer) {
             case (#minted(payload)) {
-                ignore Directory.merge(mem, payload.directory, self, now);
                 completeWithChip(mem, trade, payload.chip, now);
             };
-            case (#pending(payload)) {
-                ignore Directory.merge(mem, payload.directory, self, now);
+            case (#pending) {
                 setOutgoing(mem, key, { trade with state = #pending_designer; updated_at_ns = now });
                 #ok("pending");
             };
             case (#declined(payload)) {
-                ignore Directory.merge(mem, payload.directory, self, now);
                 restoreOffer(mem, trade);
                 setOutgoing(
                     mem,
@@ -383,24 +379,27 @@ module {
             case null {};
         };
 
+        // The one place a designer still enters this table without the owner
+        // asking. A peer who proposes a trade has proved they are running
+        // Chipswap and can be reached, which is exactly what an entry claims, so
+        // the same call also withdraws a retirement we had concluded about them.
         ignore Directory.noteExcludingSelf(mem, caller, self, #trade, now);
-        ignore Directory.merge(mem, request.directory, self, now);
-        let share = Directory.share(mem, self, Directory.MAX_SHARE);
+        if (not Principal.equal(caller, self)) Directory.noteReachable(mem, caller, now);
 
         let ?design = Designs.get(mem, request.want_design_id) else {
-            return #declined({ reason = "unknown_design"; directory = share });
+            return #declined({ reason = "unknown_design" });
         };
         if (design.state != #published) {
-            return #declined({ reason = "unknown_design"; directory = share });
+            return #declined({ reason = "unknown_design" });
         };
 
         let offeredChip = chipFromWire(request.offered, now);
         let offeredKey = Holdings.key(offeredChip.ref);
         if (Holdings.get(mem, offeredKey) != null) {
-            return #declined({ reason = "duplicate_offer"; directory = share });
+            return #declined({ reason = "duplicate_offer" });
         };
         if (offerEscrowed(mem, offeredKey)) {
-            return #declined({ reason = "duplicate_offer"; directory = share });
+            return #declined({ reason = "duplicate_offer" });
         };
 
         // Requirements are settled before anything is held or minted. An offer
@@ -410,20 +409,20 @@ module {
         switch (
             Requirements.checkArt(design.requirements, offeredChip.art, offeredChip.nsfw)
         ) {
-            case (?reason) return #declined({ reason; directory = share });
+            case (?reason) return #declined({ reason });
             case null {};
         };
 
         if (not design.requirements.approval) {
             if (Holdings.count(mem) >= Holdings.MAX_HOLDINGS) {
-                return #declined({ reason = "holdings_full"; directory = share });
+                return #declined({ reason = "holdings_full" });
             };
             switch (Holdings.admit(mem, offeredChip)) {
-                case (#err(code)) return #declined({ reason = code; directory = share });
+                case (#err(code)) return #declined({ reason = code });
                 case (#ok(())) {};
             };
             switch (Designs.mint(mem, request.want_design_id, self, now)) {
-                case (#err(code)) return #declined({ reason = code; directory = share });
+                case (#err(code)) return #declined({ reason = code });
                 case (#ok(minted)) {
                     recordReplay(
                         mem,
@@ -437,13 +436,13 @@ module {
                         }),
                         now,
                     );
-                    return #minted({ chip = chipToWire(minted); directory = share });
+                    return #minted({ chip = chipToWire(minted) });
                 };
             };
         };
 
         if (Map.size(mem.incoming) >= MAX_INCOMING) {
-            return #declined({ reason = "incoming_full"; directory = share });
+            return #declined({ reason = "incoming_full" });
         };
         Map.add(
             mem.incoming,
@@ -460,7 +459,7 @@ module {
             } : Memory.IncomingTrade,
         );
         recordReplay(mem, key, caller, request.request_id, #pending, now);
-        #pending({ directory = share });
+        #pending;
     };
 
     public func acceptPending(
@@ -804,8 +803,8 @@ module {
         if (not Principal.equal(record.peer, caller)) return null;
         if (hex(record.request_id) != hex(requestId)) return null;
         switch (record.outcome) {
-            case (#pending) ?#pending({ directory = [] });
-            case (#declined(reason)) ?#declined({ reason; directory = [] });
+            case (#pending) ?#pending;
+            case (#declined(reason)) ?#declined({ reason });
             case (#minted(details)) {
                 let ?design = Designs.get(mem, details.design_id) else return null;
                 ?#minted({
@@ -816,7 +815,6 @@ module {
                         self,
                         details.nsfw,
                     );
-                    directory = [];
                 });
             };
         };

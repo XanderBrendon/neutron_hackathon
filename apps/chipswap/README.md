@@ -56,19 +56,38 @@ peer never answers, the trade becomes `uncertain` and the chip stays committed
 until the `status` route says what actually happened — the app never restores a
 chip the other side may already hold.
 
-**Directory.** Every trade carries up to 32 designer addresses in each
-direction, so trading is also how you discover new designers. Learning about
-someone does *not* publish you to them: `announce` is a separate choice you make
-one designer at a time. Contacts entries carrying a Neutron address can be added
-directly.
+**Directory.** Nothing arrives in your directory unasked. A designer is there
+because you typed their address in, because you added them from Contacts,
+because they proposed a trade to you, or because you went looking. Nothing rides
+along on ordinary traffic, and there is no way to push yourself into someone
+else's list — you enter the graph by trading, and spread from there.
+
+**Finding more designers.** *Find more designers* asks every designer you know
+for their directory, a page at a time, then asks whoever that turns up, until
+there is nobody left to ask. It runs in rounds so a long crawl shows what it has
+done and what it has left, and can be stopped. The route it calls is a query: it
+reads, it cannot write, and so a crawl costs the peer nothing, is exempt from
+their paid-route rate limits, and leaves no trace — they never learn who was
+looking.
 
 **Ignoring a designer.** Ignoring is not forgetting. A forgotten designer comes
-straight back the next time a peer shares their directory, with no memory of
-having been turned away; an ignored one stays in your list saying so. While a
-designer is ignored their catalog is never fetched, their cached designs leave
-the store, and you stop passing their address on to peers. Un-ignoring restores
+straight back the next time a crawl finds them, with no memory of having been
+turned away; an ignored one stays in your list saying so. While a designer is
+ignored their catalog is never fetched, their cached designs leave the store,
+and you stop handing their address to peers who crawl you. Un-ignoring restores
 the entry, not the catalog: nothing of theirs reappears until the next refresh
 actually fetches something.
+
+**Retired designers.** A designer who uninstalls Chipswap leaves a canister that
+no longer answers. The kernel does not tell an app *why* a call was rejected, so
+one silent call proves nothing — a canister can be stopped, frozen, or briefly
+out of cycles. Three unanswered calls in a row, with any reply at all resetting
+the count, mark the designer retired, and a retired one is treated exactly as an
+ignored one. Only the paid update routes count: a peer on an older release has
+no query dispatcher at all, and must not be retired for having yet to upgrade. A
+trade proposal from a retired designer disproves the conclusion and clears it,
+and the owner can clear or set it by hand. Chips you already hold from them stay
+yours — a chip is copied to you when the trade completes, not fetched later.
 
 **Store.** The store reads a bounded cache of the catalogs you have fetched, so
 it opens instantly and refreshes explicitly. It filters by ownership, by
@@ -76,27 +95,31 @@ designer ownership, by trade policy, and by the NSFW tag.
 
 ## The chipswap_v1 protocol
 
-Five route ids share one paid public-ingress dispatcher,
-`app_chipswap__chipswap_v1_update`. Every route is an update from a canister
-caller, and the sender pays:
+Five route ids share two public-ingress dispatchers, one per call mode. Four are
+updates on `app_chipswap__chipswap_v1_update`, where the sender pays for the work
+and storage it asks of a peer. The fifth is a query on
+`app_chipswap__chipswap_v1_query`, which writes nothing and therefore declares no
+floor and no rate limit. Every route takes a canister caller:
 
-| Route | Purpose | Cycles floor |
-| --- | --- | --- |
-| `catalog` | fetch a designer's published designs | 300 M |
-| `trade` | offer a chip and request a design | 600 M |
-| `deliver` | complete or return a manual trade | 600 M |
-| `status` | recover the outcome of an uncertain send | 200 M |
-| `announce` | publish yourself into a peer's directory | 200 M |
+| Route | Mode | Purpose | Cycles floor |
+| --- | --- | --- | --- |
+| `catalog` | update | fetch a designer's published designs | 300 M |
+| `trade` | update | offer a chip and request a design | 600 M |
+| `deliver` | update | complete or return a manual trade | 600 M |
+| `status` | update | recover the outcome of an uncertain send | 200 M |
+| `directory` | query | read one page of a peer's known designers | — |
 
 Requests are ordinary Candid, which the kernel decodes and rejects before app
 code runs. Replies are a `Blob` carrying the compact `CSW1` wire, which the
 caller parses with bounded byte arithmetic — hostile reply bytes never reach
 `from_candid`, which traps.
 
-The wire is at version 2, which added trade requirements to a catalog entry and
-the NSFW tag to a chip. It is the only version read or written: an earlier
-version 1 described the same message types differently, so a reply claiming it
-is refused rather than misread, which is what the version byte is for.
+The wire is at version 3, which removed the directory that used to ride along on
+a catalog and a trade and replaced the announce message with a directory message
+that is asked for. It is the only version read or written: versions 1 and 2
+described the same message types differently, so a reply claiming either is
+refused rather than misread, which is what the version byte is for. An install on
+version 2 and one on version 3 cannot trade until both update.
 
 Outbound authority is one `method`-scoped reservation for that dispatcher name,
 granted at install. It cannot call any other method on any canister, and it
@@ -138,7 +161,7 @@ backend/
   Shape.mo          chip geometry and art validation
   Designs.mo        the ten slots: draft, save, publish, mint
   Holdings.mo       chips held, escrowed, or uncertain
-  Directory.mo      designers, catalog cache, store filtering
+  Directory.mo      designers, the crawl, catalog cache, store filtering
   Requirements.mo   measuring an offer against a design's requirements
   Trades.mo         the trade state machine
   Wire.mo           the CSW1 peer reply format

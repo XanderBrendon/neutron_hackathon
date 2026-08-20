@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cx } from "neutron-design-system";
 import { copyToClipboard } from "neutron-tools/app";
 import {
   addDirectoryEntry,
-  announceTo,
+  crawlStep,
   errorMessage,
   fetchCatalogs,
   formatTimestamp,
@@ -11,7 +11,11 @@ import {
   loadSuggestions,
   removeDirectoryEntry,
   setDirectoryIgnored,
+  setDirectoryRetired,
   shortPrincipal,
+  startCrawl,
+  stopCrawl,
+  type CrawlProgress,
   type DirectoryEntry,
   type Status,
   type Suggestion,
@@ -35,6 +39,10 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
   const [failure, setFailure] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [crawl, setCrawl] = useState<CrawlProgress | null>(null);
+  // A ref rather than state: the loop below reads it between rounds, and a
+  // state update would not be visible to a closure already running.
+  const stopping = useRef(false);
 
   const reload = useCallback(async (nextOffset: number) => {
     try {
@@ -82,6 +90,63 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
     }
   };
 
+  // The crawl runs in rounds so a long one shows its progress and can be
+  // stopped. Each round is one call that asks up to eight designers for a page
+  // of their directory; the loop ends when nothing is left to ask.
+  const runCrawl = async (resume: boolean) => {
+    setBusy(true);
+    setFailure(null);
+    setMessage(null);
+    stopping.current = false;
+    try {
+      // Resuming skips the reset, so a crawl interrupted by a closed tile
+      // carries on from the designers it had already visited rather than
+      // spending another round on all of them.
+      let progress = resume ? await crawlStep() : await startCrawl();
+      setCrawl(progress);
+      while (!stopping.current && progress.remaining > 0) {
+        progress = await crawlStep();
+        setCrawl(progress);
+        await reload(offset);
+      }
+      if (stopping.current) {
+        await stopCrawl();
+        setCrawl(null);
+        setMessage(
+          `Stopped after ${progress.queried} designer${progress.queried === 1 ? "" : "s"}, ` +
+            `${progress.discovered} new.`,
+        );
+      } else {
+        await stopCrawl();
+        setCrawl(null);
+        setMessage(
+          progress.discovered === 0
+            ? `Asked ${progress.queried} designer${progress.queried === 1 ? "" : "s"}. Nobody new.` +
+              (progress.full ? " Your directory is full." : "")
+            : `Found ${progress.discovered} new designer${progress.discovered === 1 ? "" : "s"} ` +
+              `from ${progress.queried}.` +
+              (progress.full ? " Your directory is now full." : ""),
+        );
+      }
+      await reload(offset);
+      await onChanged();
+    } catch (error) {
+      setFailure(errorMessage(error));
+      setCrawl(null);
+    } finally {
+      stopping.current = false;
+      setBusy(false);
+    }
+  };
+
+  const crawling = crawl !== null;
+  // State left by a crawl this tile is not currently driving: the owner closed
+  // the tile, or reloaded, while one was part-way through.
+  const interrupted =
+    !crawling && status?.crawl.active && status.crawl.remaining > 0
+      ? status.crawl
+      : null;
+
   return (
     <section className="chipswap-directory">
       <div className="nt-panel">
@@ -104,6 +169,8 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
         </div>
         <p className="nt-help">
           Share this with someone so they can add you and trade for your chips.
+          Proposing a trade puts you in their directory, and from there other
+          people find you.
         </p>
 
         <div className="nt-form-grid nt-form-grid--two">
@@ -132,22 +199,6 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
               type="button"
             >
               Add
-            </button>
-            <button
-              className="nt-button nt-button--secondary nt-button--sm"
-              disabled={busy || candidate.trim().length === 0}
-              onClick={() =>
-                void run(async () => {
-                  const target = candidate.trim();
-                  await addDirectoryEntry(target, "manual");
-                  await announceTo(target);
-                  setCandidate("");
-                  return `Added ${shortPrincipal(target)} and announced yourself.`;
-                })
-              }
-              type="button"
-            >
-              Add and announce me
             </button>
           </div>
         </div>
@@ -209,6 +260,70 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
 
       <div className="nt-panel">
         <header className="nt-section-header">
+          <h2 className="nt-section-heading">Find more designers</h2>
+        </header>
+        <p className="nt-help">
+          Asks every designer you know for their directory, then asks whoever
+          that turns up, until there is nobody left to ask. Nothing is published
+          about you: this only reads.
+        </p>
+        <div className="nt-cluster">
+          <button
+            className="nt-button nt-button--sm"
+            disabled={busy || total === 0}
+            onClick={() => void runCrawl(false)}
+            type="button"
+          >
+            Find more designers
+          </button>
+          {crawling ? (
+            <button
+              className="nt-button nt-button--secondary nt-button--sm"
+              onClick={() => {
+                stopping.current = true;
+              }}
+              type="button"
+            >
+              Stop
+            </button>
+          ) : null}
+          {crawl ? (
+            <span className="nt-meta" data-tid="chipswap-crawl-progress">
+              asked {crawl.queried} · {crawl.remaining} to go ·{" "}
+              {crawl.discovered} new
+            </span>
+          ) : null}
+        </div>
+        {interrupted ? (
+          <p className="nt-callout">
+            A crawl was left part-finished, with {interrupted.remaining} designer
+            {interrupted.remaining === 1 ? "" : "s"} still to ask.{" "}
+            <button
+              className="nt-button nt-button--sm"
+              disabled={busy}
+              onClick={() => void runCrawl(true)}
+              type="button"
+            >
+              Carry on
+            </button>
+          </p>
+        ) : null}
+        {total === 0 ? (
+          <p className="nt-muted">
+            Add one designer first. A crawl walks out from the ones you already
+            know, so it needs somewhere to start.
+          </p>
+        ) : null}
+        {crawl?.full ? (
+          <p className="nt-callout nt-callout--danger" role="alert">
+            Your directory is full. Remove or ignore some designers to make room
+            for new ones.
+          </p>
+        ) : null}
+      </div>
+
+      <div className="nt-panel">
+        <header className="nt-section-header">
           <h2 className="nt-section-heading">Known designers</h2>
           <span className="nt-section-count">{total}</span>
         </header>
@@ -222,8 +337,8 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
 
         {entries.length === 0 ? (
           <p className="nt-muted">
-            Nobody yet. Paste an address above, or trade once and your
-            counterpart's directory arrives with the swap.
+            Nobody yet. Paste an address above, and then look for more designers
+            through the ones you know.
           </p>
         ) : (
           <div className="nt-table-wrap">
@@ -250,11 +365,24 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                     </td>
                     <td>
                       <span className="nt-tag">{entry.source}</span>
-                      {entry.announced ? (
-                        <span className="nt-tag nt-tag--success">announced</span>
-                      ) : null}
                       {entry.ignored ? (
                         <span className="nt-tag nt-tag--warning">ignored</span>
+                      ) : null}
+                      {entry.retired ? (
+                        <span
+                          className="nt-tag nt-tag--warning"
+                          title="This canister stopped answering. Chips you already hold are yours to keep."
+                        >
+                          retired
+                        </span>
+                      ) : null}
+                      {!entry.retired && entry.strikes > 0 ? (
+                        <span
+                          className="nt-tag"
+                          title={`${entry.strikes} call${entry.strikes === 1 ? "" : "s"} in a row went unanswered.`}
+                        >
+                          unanswered ×{entry.strikes}
+                        </span>
                       ) : null}
                     </td>
                     <td>{entry.designCount}</td>
@@ -266,12 +394,15 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                     <td className="nt-cluster">
                       <button
                         className="nt-button nt-button--sm"
-                        disabled={busy || entry.ignored}
+                        disabled={busy || entry.ignored || entry.retired}
                         onClick={() =>
                           void run(async () => {
                             const result = await fetchCatalogs([entry.canister]);
-                            return result.fetched.length > 0
-                              ? "Catalogue refreshed."
+                            if (result.fetched.length > 0) {
+                              return "Catalogue refreshed.";
+                            }
+                            return result.retired.length > 0
+                              ? "No answer again. Marked retired — they seem to have uninstalled Chipswap."
                               : "That designer did not answer.";
                           })
                         }
@@ -281,18 +412,24 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                       </button>
                       <button
                         className={cx("nt-button nt-button--sm", {
-                          "nt-button--secondary": entry.announced,
+                          "nt-button--secondary": entry.retired,
+                          "nt-button--ghost": !entry.retired,
                         })}
                         disabled={busy}
                         onClick={() =>
                           void run(async () => {
-                            await announceTo(entry.canister);
-                            return "They know about you now.";
+                            await setDirectoryRetired(
+                              entry.canister,
+                              !entry.retired,
+                            );
+                            return entry.retired
+                              ? "Back in the rotation. Refresh to see whether they answer."
+                              : "Marked retired. They will not be called again.";
                           })
                         }
                         type="button"
                       >
-                        {entry.announced ? "Announce again" : "Announce me"}
+                        {entry.retired ? "Not retired" : "Retire"}
                       </button>
                       <button
                         className={cx("nt-button nt-button--sm", {

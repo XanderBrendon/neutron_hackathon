@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 107,
+    version: 108,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -56,18 +56,20 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     ],
     // Every released schema stays exactly as released, so each persistent change
     // adds a version beside its predecessors. The edges are linear and complete,
-    // which is what lets a canister still on v1 reach v3 in one upgrade.
+    // which is what lets a canister still on v1 reach v4 in one upgrade.
     memory: {
       chipswap: {
-        version: 3,
+        version: 4,
         schemas: {
           1: { src: "memory/chipswap/v1.mo" },
           2: { src: "memory/chipswap/v2.mo" },
           3: { src: "memory/chipswap/v3.mo" },
+          4: { src: "memory/chipswap/v4.mo" },
         },
         migrations: [
           { from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" },
           { from: 2, to: 3, src: "memory/chipswap/v2_to_v3.mo" },
+          { from: 3, to: 4, src: "memory/chipswap/v3_to_v4.mo" },
         ],
       },
     },
@@ -75,7 +77,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
   expect(manifest).not.toHaveProperty("init_arg");
 });
 
-test("chipswap declares the five paid chipswap_v1 routes", async () => {
+test("chipswap declares four paid routes and one free one", async () => {
   const manifest = await readManifest();
 
   expect(manifest.capabilities?.public_ingress).toMatchObject({
@@ -119,21 +121,35 @@ test("chipswap declares the five paid chipswap_v1 routes", async () => {
         caller: "canister",
         required_cycles: 200000000,
       },
+      // The crawl's route is a query: it reads, it cannot write, and so it
+      // declares no cycles floor and no rate limit. A peer's crawl costs us
+      // nothing and tells us nothing, which is the trade it makes.
       {
         protocol: "chipswap_v1",
-        id: "announce",
-        handler: "chipswap_announce_v1",
-        mode: "update",
+        id: "directory",
+        handler: "chipswap_directory_v1",
+        mode: "query",
         caller: "canister",
-        required_cycles: 200000000,
+        max_request_bytes: 1024,
+        max_response_bytes: 8192,
       },
     ],
   });
 
-  // Every route handler takes the kernel-supplied caller and nothing else.
+  const directoryRoute = routes(manifest).find((route) => route.id === "directory");
+  expect(directoryRoute).not.toHaveProperty("required_cycles");
+  expect(directoryRoute).not.toHaveProperty("max_calls_per_hour");
+  // A full page of principals fits inside what the route will return.
+  expect(directoryRoute?.max_response_bytes ?? 0).toBeGreaterThanOrEqual(128 * 30);
+
+  // Nothing announces any more: discovery is a pull, and the push is gone.
+  expect(routes(manifest).map((route) => route.id)).not.toContain("announce");
+
+  // Every route handler takes the kernel-supplied caller and nothing else, in
+  // whichever mode its route declares.
   for (const route of routes(manifest)) {
     expect(funcMap(manifest)[route.handler]).toEqual({
-      type: "update",
+      type: route.mode,
       async: false,
       arg: ["caller"],
     });
@@ -147,8 +163,11 @@ test("outbound trading is scoped to the chipswap dispatcher alone", async () => 
   expect(manifest.capabilities?.backend_calls).toMatchObject({
     api: 1,
     reservation_scopes: ["method"],
+    // Two dispatchers, because a query route is a different physical method
+    // from an update one and each is reserved on its own.
     install_reservations: [
       { kind: "method", method: "app_chipswap__chipswap_v1_update" },
+      { kind: "method", method: "app_chipswap__chipswap_v1_query" },
     ],
     max_concurrency: 8,
     max_cycles_per_call: 600000000,

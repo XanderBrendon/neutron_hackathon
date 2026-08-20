@@ -8,6 +8,7 @@ import {
   nsText,
   parseArt,
   parseChip,
+  parseCrawlProgress,
   parseDesign,
   parseDirectoryEntry,
   parseIncomingTrade,
@@ -186,6 +187,13 @@ test("status reports the geometry the editor draws with", () => {
     catalog_designers: "2",
     incoming_pending: "1",
     outgoing_active: "0",
+    crawl: {
+      active: true,
+      queried: "4",
+      discovered: "6",
+      remaining: "11",
+      full: false,
+    },
     shape_id: "circle31",
     pixel_count: "757",
     row_widths: ["9", "13"],
@@ -197,6 +205,34 @@ test("status reports the geometry the editor draws with", () => {
   expect(status.pixelCount).toBe(757);
   expect(status.rowWidths).toEqual([9, 13]);
   expect(status.contactsAvailable).toBe(true);
+  // A crawl interrupted by a closed tile is reported as resumable, so the tile
+  // can offer to carry on rather than silently starting over.
+  expect(status.crawl.active).toBe(true);
+  expect(status.crawl.remaining).toBe(11);
+  expect(status.crawl.discovered).toBe(6);
+  expect(status.crawl.full).toBe(false);
+});
+
+test("crawl progress counts what is left, not only what is done", () => {
+  const idle = parseCrawlProgress({
+    active: false,
+    queried: "0",
+    discovered: "0",
+    remaining: "0",
+    full: true,
+  });
+  expect(idle.active).toBe(false);
+  expect(idle.full).toBe(true);
+
+  expect(() =>
+    parseCrawlProgress({
+      active: true,
+      queried: "1",
+      discovered: "0",
+      remaining: "-2",
+      full: false,
+    }),
+  ).toThrow();
 });
 
 test("directory and store rows carry the ownership flags the filters use", () => {
@@ -205,13 +241,17 @@ test("directory and store rows carry the ownership flags the filters use", () =>
     source: "trade",
     first_seen_ns: "1",
     last_seen_ns: "2",
-    announced: true,
     ignored: true,
+    retired: false,
+    strikes: "2",
     design_count: "3",
     owns_chip: false,
   });
-  expect(entry.announced).toBe(true);
   expect(entry.ignored).toBe(true);
+  // Struck twice but not retired: the tile shows the count so an owner can see
+  // a designer going quiet before the conclusion is drawn.
+  expect(entry.retired).toBe(false);
+  expect(entry.strikes).toBe(2);
   expect(entry.lastCatalogNs).toBeNull();
   expect(entry.ownsChip).toBe(false);
 
