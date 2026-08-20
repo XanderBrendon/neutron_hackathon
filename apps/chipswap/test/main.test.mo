@@ -223,8 +223,13 @@ assert (directory.entries[0].strikes == 0);
 // relationship; proposing a trade is, which is why the peer above is listed and
 // this one is not.
 let browser = Principal.fromBlob(Blob.fromArray([0, 4, 4, 1]));
+let beforeBrowse = chipswap.chipswap_status(()).revision;
 ignore chipswap.chipswap_catalog_v1({}, browser);
 assert (chipswap.chipswap_directory({ offset = 0; limit = 10 }).total == 1);
+// Nor does it leave a trace in the revision the tile polls. A catalog read is
+// a query: it writes nothing, so there is nothing for the owner's tile to
+// notice about a stranger's curiosity.
+assert (chipswap.chipswap_status(()).revision == beforeBrowse);
 
 // Replaying the same request returns the same chip without minting again.
 let replayBytes = chipswap.chipswap_trade_v1(

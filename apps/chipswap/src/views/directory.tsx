@@ -398,11 +398,8 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                         onClick={() =>
                           void run(async () => {
                             const result = await fetchCatalogs([entry.canister]);
-                            if (result.fetched.length > 0) {
-                              return "Catalog refreshed.";
-                            }
-                            return result.retired.length > 0
-                              ? "No answer again. Marked retired — they seem to have uninstalled Chipswap."
+                            return result.fetched.length > 0
+                              ? "Catalog refreshed."
                               : "That designer did not answer.";
                           })
                         }

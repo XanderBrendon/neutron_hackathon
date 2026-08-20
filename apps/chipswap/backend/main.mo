@@ -283,7 +283,7 @@ module {
     };
 
     public type FetchCatalogsResult = {
-        #ok : { fetched : [Text]; failed : [Text]; retired : [Text]; revision : Nat };
+        #ok : { fetched : [Text]; failed : [Text]; revision : Nat };
         #err : Err;
     };
 
@@ -432,8 +432,9 @@ module {
     // --- Protocol constants -------------------------------------------------
 
     let INGRESS_METHOD : Text = "app_chipswap__chipswap_v1_update";
-    // The crawl's route is a query, and a query dispatcher is a different
-    // physical method from the update one.
+    // A query route is reached through a different physical method from the
+    // update one: a query dispatcher and an update dispatcher are separate
+    // entry points, not two moods of the same one.
     let INGRESS_QUERY_METHOD : Text = "app_chipswap__chipswap_v1_query";
     let ROUTE_CATALOG : Text = "catalog";
     let ROUTE_TRADE : Text = "trade";
@@ -443,13 +444,13 @@ module {
 
     // Each floor matches capabilities.public_ingress in neutron.json. The sender
     // pays for the work and storage it asks a peer to perform.
-    let CATALOG_CYCLES : Nat = 300_000_000;
     let TRADE_CYCLES : Nat = 600_000_000;
     let DELIVER_CYCLES : Nat = 600_000_000;
     let STATUS_CYCLES : Nat = 200_000_000;
-    // A query route declares no floor and can accept nothing, so a crawl costs
-    // the peer nothing and attaches nothing.
-    let DIRECTORY_CYCLES : Nat = 0;
+    // A query route declares no floor and can accept nothing, so reading a
+    // peer's catalog or crawling their directory attaches nothing and costs
+    // them nothing.
+    let QUERY_ROUTE_CYCLES : Nat = 0;
 
     let CANDID_SLACK : Nat = 64;
     let MAX_FETCH_TARGETS : Nat = 8;
@@ -1008,16 +1009,13 @@ module {
             let payloads = Array.map<Directory.CrawlTarget, NeutronCapabilities.BackendCallRequestV1>(
                 targets,
                 func(target) {
-                    let request : NeutronCapabilities.PublicIngressRequestV1 = {
-                        method = ROUTE_DIRECTORY;
-                        payload = to_candid ({ offset = target.offset; limit = CRAWL_PAGE } : PeerDirectoryRequest);
-                    };
-                    {
-                        canister = target.canister;
-                        method = INGRESS_QUERY_METHOD;
-                        args = to_candid (request);
-                        cycles = DIRECTORY_CYCLES;
-                    };
+                    routeCall(
+                        target.canister,
+                        INGRESS_QUERY_METHOD,
+                        ROUTE_DIRECTORY,
+                        to_candid ({ offset = target.offset; limit = CRAWL_PAGE } : PeerDirectoryRequest),
+                        QUERY_ROUTE_CYCLES,
+                    );
                 },
             );
             let results = await* calls.call_batch(payloads);
@@ -1071,23 +1069,23 @@ module {
             if (List.size(targets) == 0) return #err(error("invalid_request"));
 
             let now = Time.now();
-            let args = to_candid ({} : PeerCatalogRequest);
+            let payload = to_candid ({} : PeerCatalogRequest);
             let requests = Array.map<Principal, NeutronCapabilities.BackendCallRequestV1>(
                 List.toArray(targets),
                 func(target) {
-                    {
-                        canister = target;
-                        method = INGRESS_METHOD;
-                        args;
-                        cycles = CATALOG_CYCLES;
-                    };
+                    routeCall(
+                        target,
+                        INGRESS_QUERY_METHOD,
+                        ROUTE_CATALOG,
+                        payload,
+                        QUERY_ROUTE_CYCLES,
+                    );
                 },
             );
             let results = await* calls.call_batch(requests);
 
             let fetched = List.empty<Text>();
             let failed = List.empty<Text>();
-            let retired = List.empty<Text>();
             let ordered = List.toArray(targets);
             var index = 0;
             while (index < ordered.size()) {
@@ -1118,15 +1116,13 @@ module {
                         List.add(fetched, Principal.toText(target));
                     };
                     case null {
-                        // A catalog read is one of the three calls a live peer
-                        // always answers, so a rejection here is evidence about
-                        // the peer rather than about the message. Unreadable
-                        // bytes are not: that call was answered.
-                        if (rejected(outcome)) {
-                            if (Directory.noteUnreachable(mem, target, now)) {
-                                List.add(retired, Principal.toText(target));
-                            };
-                        };
+                        // Silence here concludes nothing about the designer.
+                        // The catalog route is a query, and a peer on a release
+                        // older than 108 exposes no query dispatcher to reject
+                        // it with — retiring them for that would be retiring
+                        // them for not having upgraded. Reachability is decided
+                        // on the paid routes, where a rejection means what it
+                        // says.
                         List.add(failed, Principal.toText(target));
                     };
                 };
@@ -1136,7 +1132,6 @@ module {
             #ok({
                 fetched = List.toArray(fetched);
                 failed = List.toArray(failed);
-                retired = List.toArray(retired);
                 revision = mem.revision;
             });
         };
@@ -1277,11 +1272,14 @@ module {
 
         // --- Peer routes ------------------------------------------------------
 
-        public func /*update*/chipswap_catalog_v1(
-            // Reading a catalog no longer puts the reader in our directory.
-            // Browsing is not a relationship, and a designer who wants to be
-            // known to us can propose a trade, which is.
-            request : PeerCatalogRequest,
+        // Our published designs, for a peer's market. This is a query for the
+        // same reason the crawl route is: reading a catalog no longer puts the
+        // reader in our directory, and a route that records nothing about its
+        // caller has no business charging them for the privilege. Browsing is
+        // not a relationship; a designer who wants to be known to us can
+        // propose a trade, which is.
+        public func /*query*/chipswap_catalog_v1(
+            _request : PeerCatalogRequest,
             /*caller*/ _caller : Principal,
         ) : Blob {
             let designs = Array.map<Memory.Design, Wire.Design>(
@@ -1301,7 +1299,6 @@ module {
                     };
                 },
             );
-            bump();
             Wire.encodeCatalogReply({ designs });
         };
 
@@ -1404,8 +1401,40 @@ module {
             });
         };
 
-        // One paid call to a peer's public-ingress dispatcher. A failure of any
-        // kind returns null: the caller decides what that means for its state.
+        // Every outbound call to a peer is built here and nowhere else. A peer
+        // exposes one dispatcher per mode, not one method per route, so the
+        // route name travels inside the argument: a request that forgets to
+        // name its route does not reach a handler, it fails to decode at the
+        // door. Building that envelope by hand at each call site is what let
+        // one of them ship without it, so there is now only one hand to build
+        // it with.
+        func routeCall(
+            target : Principal,
+            physical : Text,
+            route : Text,
+            payload : Blob,
+            cycles : Nat,
+        ) : NeutronCapabilities.BackendCallRequestV1 {
+            let envelope : NeutronCapabilities.PublicIngressRequestV1 = {
+                method = route;
+                payload;
+            };
+            {
+                canister = target;
+                method = physical;
+                args = to_candid (envelope);
+                cycles;
+            };
+        };
+
+        // One paid call to a peer's update dispatcher. A failure of any kind
+        // returns null: the caller decides what that means for its state.
+        //
+        // This is also where a designer's reachability is decided, because a
+        // paid route is the only place it can honestly be decided. These three
+        // routes have existed for as long as the protocol has, so a rejection
+        // here is about the peer; the query routes cannot say the same, and do
+        // not report through here.
         func callRoute(
             target : Principal,
             route : Text,
@@ -1413,18 +1442,11 @@ module {
             cycles : Nat,
             maxReplyBytes : Nat,
         ) : async* ?Blob {
-            let request : NeutronCapabilities.PublicIngressRequestV1 = {
-                method = route;
-                payload;
-            };
-            switch (
-                await* calls.call({
-                    canister = target;
-                    method = INGRESS_METHOD;
-                    args = to_candid (request);
-                    cycles;
-                })
-            ) {
+            let result = await* calls.call(
+                routeCall(target, INGRESS_METHOD, route, payload, cycles)
+            );
+            ignore Directory.noteCallResult(mem, target, result, Time.now());
+            switch (result) {
                 case (#err(_)) null;
                 case (#ok(reply)) unwrapReply(reply, maxReplyBytes);
             };
@@ -1438,13 +1460,6 @@ module {
                 discovered = progress.discovered;
                 remaining = progress.remaining;
                 full = progress.full;
-            };
-        };
-
-        func rejected(result : ?NeutronCapabilities.BackendCallResultV1) : Bool {
-            switch (result) {
-                case (?#err(error)) Directory.strikeable(error.code);
-                case (_) false;
             };
         };
 
@@ -1898,7 +1913,7 @@ public type chipswap_trade_accept_Output = TradeActionResult;
 public type chipswap_trade_decline_Input = (request : TradeRequestRef);
 public type chipswap_trade_decline_Output = TradeActionResult;
 
-public type chipswap_catalog_v1_Input = (request : PeerCatalogRequest);
+public type chipswap_catalog_v1_Input = (_request : PeerCatalogRequest);
 public type chipswap_catalog_v1_Output = Blob;
 
 public type chipswap_trade_v1_Input = (request : PeerTradeRequest);

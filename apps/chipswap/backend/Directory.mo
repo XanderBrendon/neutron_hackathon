@@ -6,6 +6,7 @@ import Nat "mo:core/Nat";
 import Order "mo:core/Order";
 import Principal "mo:core/Principal";
 import Text "mo:core/Text";
+import NeutronCapabilities "mo:neutron-capabilities";
 import Designs "./Designs";
 import Holdings "./Holdings";
 import Memory "./memory/chipswap/v4";
@@ -131,21 +132,45 @@ module {
         );
     };
 
-    // A designer did not answer a call a live one would have. Returns true when
-    // this is the strike that retires them, so the caller can say so once rather
-    // than re-deriving it.
-    //
-    // Only the paid update routes are counted. A crawl query must never reach
-    // here: a peer on the previous release exposes no query dispatcher at all,
-    // and retiring them for not having upgraded yet would be a lie about the
-    // one thing this flag claims to know.
     // Which backend-call failure is evidence about the peer rather than about
     // us. A rejection is their canister declining to run our dispatcher at all;
     // every other code the broker returns describes something that went wrong on
     // this side, and striking a designer for our own concurrency limit would be
-    // unjust. An unreadable reply is not here either: that call was answered.
+    // unjust.
     public func strikeable(code : Text) : Bool {
         code == "call_rejected";
+    };
+
+    // What one paid call's outcome says about the designer we made it to.
+    // Returns true when this is the outcome that retires them, so the caller
+    // can say so once rather than re-deriving it.
+    //
+    // Only the paid update routes may pass through here. A query must never
+    // reach it: those routes exist only from version 108, and a peer on an
+    // older release exposes no query dispatcher at all — retiring them for
+    // having yet to upgrade would be a lie about the one thing this flag
+    // claims to know.
+    //
+    // An answer we could not decode is still an answer. The bytes prove a
+    // canister ran our dispatcher and replied, which is the whole question
+    // this flag asks; whether we could read them is our problem, not evidence
+    // about them.
+    public func noteCallResult(
+        mem : Memory.Mem,
+        canister : Principal,
+        result : NeutronCapabilities.BackendCallResultV1,
+        now : Int,
+    ) : Bool {
+        switch (result) {
+            case (#ok(_)) {
+                noteReachable(mem, canister, now);
+                false;
+            };
+            case (#err(error)) {
+                if (not strikeable(error.code)) return false;
+                noteUnreachable(mem, canister, now);
+            };
+        };
     };
 
     public func noteUnreachable(mem : Memory.Mem, canister : Principal, now : Int) : Bool {

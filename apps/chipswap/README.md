@@ -83,8 +83,11 @@ no longer answers. The kernel does not tell an app *why* a call was rejected, so
 one silent call proves nothing — a canister can be stopped, frozen, or briefly
 out of cycles. Three unanswered calls in a row, with any reply at all resetting
 the count, mark the designer retired, and a retired one is treated exactly as an
-ignored one. Only the paid update routes count: a peer on an older release has
-no query dispatcher at all, and must not be retired for having yet to upgrade. A
+ignored one. Only the paid update routes count — proposing, resolving, and
+delivering a trade. Those have existed for as long as the protocol has, so a
+rejection on one is about the peer; the query routes are newer, and a designer
+who has yet to upgrade to them must not be retired for it. That is why a
+catalog refresh reports silence without concluding anything from it. A
 trade proposal from a retired designer disproves the conclusion and clears it,
 and the owner can clear or set it by hand. Chips you already hold from them stay
 yours — a chip is copied to you when the trade completes, not fetched later.
@@ -113,18 +116,20 @@ see.
 
 ## The chipswap_v1 protocol
 
-Five route ids share two public-ingress dispatchers, one per call mode. Four are
-updates on `app_chipswap__chipswap_v1_update`, where the sender pays for the work
-and storage it asks of a peer. The fifth is a query on
-`app_chipswap__chipswap_v1_query`, which writes nothing and therefore declares no
-floor and no rate limit. Every route takes a canister caller:
+Five route ids share two public-ingress dispatchers, one per call mode. Three
+are updates on `app_chipswap__chipswap_v1_update`, where the sender pays for the
+work and storage it asks of a peer. The other two are queries on
+`app_chipswap__chipswap_v1_query`, which write nothing and therefore declare no
+floor and no rate limit — the kernel permits a query route neither. The three
+that change a peer's state are the three that cost something, which is the whole
+rule. Every route takes a canister caller:
 
 | Route | Mode | Purpose | Cycles floor |
 | --- | --- | --- | --- |
-| `catalog` | update | fetch a designer's published designs | 300 M |
 | `trade` | update | offer a chip and request a design | 600 M |
 | `deliver` | update | complete or return a manual trade | 600 M |
 | `status` | update | recover the outcome of an uncertain send | 200 M |
+| `catalog` | query | fetch a designer's published designs | — |
 | `directory` | query | read one page of a peer's known designers | — |
 
 Requests are ordinary Candid, which the kernel decodes and rejects before app

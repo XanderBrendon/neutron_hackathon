@@ -575,6 +575,44 @@ assert (Directory.retired(strikes, alice));
 assert (Directory.noteUnreachable(strikes, alice, 8) == false);
 assert (Directory.reachable(strikes, alice) == false);
 
+// --- Reading one call outcome ----------------------------------------------
+
+// The outcome of a paid call is the only evidence we get about a designer, and
+// exactly one code in it is evidence about *them*. Everything else describes
+// something that happened on our side, or is an answer we could not read —
+// and an answer, however garbled, proves someone is home.
+let outcomes = Memory.init();
+ignore Directory.note(outcomes, bob, #manual, 1);
+
+// Our own limits are not their fault, so they cost nothing.
+assert (
+    Directory.noteCallResult(
+        outcomes,
+        bob,
+        #err({ code = "concurrency_limit"; message = "" }),
+        2,
+    ) == false
+);
+let ?unblamed = Directory.get(outcomes, bob) else Runtime.trap("entry missing");
+assert (unblamed.strikes == 0);
+
+// A rejection is theirs, and three of them retire the designer.
+assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 3) == false);
+assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 4) == false);
+
+// Bytes we cannot decode still came back from a canister that ran, so the
+// count resets rather than climbing to the third strike.
+assert (Directory.noteCallResult(outcomes, bob, #ok("\00\01\02"), 5) == false);
+let ?answered = Directory.get(outcomes, bob) else Runtime.trap("entry missing");
+assert (answered.strikes == 0);
+assert (answered.retired == false);
+
+// And with nothing to reset it, the third rejection concludes it once.
+assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 6) == false);
+assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 7) == false);
+assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 8));
+assert (Directory.retired(outcomes, bob));
+
 // A retired designer reads as ignored everywhere it matters, but the entry
 // survives: forgetting them would let the next crawl bring them straight back.
 assert (Directory.get(strikes, alice) != null);

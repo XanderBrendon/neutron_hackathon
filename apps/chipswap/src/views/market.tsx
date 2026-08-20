@@ -166,24 +166,20 @@ export const Market = ({ status, onChanged }: Props) => {
       }
       let fetched = 0;
       let failed = 0;
-      let retired = 0;
       // The manifest caps one batch at eight peers, so walk the directory.
       for (let index = 0; index < targets.length; index += BATCH) {
         const slice = targets.slice(index, index + BATCH);
         const result = await fetchCatalogs(slice);
         fetched += result.fetched.length;
         failed += result.failed.length;
-        retired += result.retired.length;
       }
+      // Silence here is reported and nothing more. A catalog read is a query,
+      // and a designer who did not answer one has not thereby been judged
+      // gone — that conclusion is drawn on the paid routes, and shows up as
+      // the retired badge in the Directory rather than here.
       setMessage(
         `Refreshed ${fetched} designer${fetched === 1 ? "" : "s"}` +
-          (failed > 0 ? `, ${failed} did not answer` : "") +
-          // Said apart from "did not answer" because it is a different claim:
-          // those have now gone quiet often enough to look uninstalled, and
-          // nothing will call them again until the owner says otherwise.
-          (retired > 0
-            ? `, ${retired} marked retired after repeated silence.`
-            : "."),
+          (failed > 0 ? `, ${failed} did not answer.` : "."),
       );
       await reload(filter, offset);
       await onChanged();

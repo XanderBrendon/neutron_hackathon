@@ -77,23 +77,23 @@ test("chipswap manifest validates and declares its identity and tile", async () 
   expect(manifest).not.toHaveProperty("init_arg");
 });
 
-test("chipswap declares four paid routes and one free one", async () => {
+test("chipswap declares three paid routes and two free ones", async () => {
   const manifest = await readManifest();
 
   expect(manifest.capabilities?.public_ingress).toMatchObject({
     api: 1,
     routes: [
+      // Reading a catalog is a query for the same reason crawling is: it
+      // writes nothing and records nothing about who asked, so it charges
+      // nothing either.
       {
         protocol: "chipswap_v1",
         id: "catalog",
         handler: "chipswap_catalog_v1",
-        mode: "update",
+        mode: "query",
         caller: "canister",
         max_request_bytes: 1024,
         max_response_bytes: 65536,
-        max_calls_per_hour: 240,
-        max_calls_per_caller_per_hour: 60,
-        required_cycles: 300000000,
       },
       {
         protocol: "chipswap_v1",
@@ -136,11 +136,25 @@ test("chipswap declares four paid routes and one free one", async () => {
     ],
   });
 
+  // A subset match would not notice a floor left behind, and the kernel
+  // refuses a query route that carries one at all. Both free routes are held
+  // to that here rather than trusted to the shape above.
+  for (const id of ["catalog", "directory"]) {
+    const free = routes(manifest).find((route) => route.id === id);
+    expect(free?.mode).toBe("query");
+    expect(free).not.toHaveProperty("required_cycles");
+    expect(free).not.toHaveProperty("max_calls_per_hour");
+    expect(free).not.toHaveProperty("max_calls_per_caller_per_hour");
+  }
+
   const directoryRoute = routes(manifest).find((route) => route.id === "directory");
-  expect(directoryRoute).not.toHaveProperty("required_cycles");
-  expect(directoryRoute).not.toHaveProperty("max_calls_per_hour");
   // A full page of principals fits inside what the route will return.
   expect(directoryRoute?.max_response_bytes ?? 0).toBeGreaterThanOrEqual(128 * 30);
+
+  // A full catalog fits inside what the route will return, and the decoder on
+  // the other end accepts exactly that much: Wire.MAX_MESSAGE_BYTES.
+  const catalogRoute = routes(manifest).find((route) => route.id === "catalog");
+  expect(catalogRoute?.max_response_bytes).toBe(65536);
 
   // Nothing announces any more: discovery is a pull, and the push is gone.
   expect(routes(manifest).map((route) => route.id)).not.toContain("announce");

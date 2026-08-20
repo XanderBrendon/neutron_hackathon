@@ -2,7 +2,7 @@
   "format": 3,
   "name": "Chipswap",
   "id": "chipswap",
-  "version": 110,
+  "version": 111,
   "update_source": "233tv-xiaaa-aaaay-aacta-cai",
   "description": "Design, publish, and trade pixel chips between Neutron canisters",
   "src": "main.mo",
@@ -40,13 +40,10 @@
           "protocol": "chipswap_v1",
           "id": "catalog",
           "handler": "chipswap_catalog_v1",
-          "mode": "update",
+          "mode": "query",
           "caller": "canister",
           "max_request_bytes": 1024,
-          "max_response_bytes": 65536,
-          "max_calls_per_hour": 240,
-          "max_calls_per_caller_per_hour": 60,
-          "required_cycles": 300000000
+          "max_response_bytes": 65536
         },
         {
           "protocol": "chipswap_v1",
@@ -268,7 +265,7 @@
       "async": "async*"
     },
     "chipswap_catalog_v1": {
-      "type": "update",
+      "type": "query",
       "async": false,
       "arg": [
         "caller"

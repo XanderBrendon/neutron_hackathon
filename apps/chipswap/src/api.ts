@@ -810,7 +810,7 @@ export async function stopCrawl(): Promise<CrawlProgress> {
 
 export async function fetchCatalogs(
   canisters: string[],
-): Promise<{ fetched: string[]; failed: string[]; retired: string[] }> {
+): Promise<{ fetched: string[]; failed: string[] }> {
   const value = unwrap(
     await updateSelf("chipswap_fetch_catalogs", [
       { canisters },
@@ -822,9 +822,6 @@ export async function fetchCatalogs(
       text(entry, "canister id"),
     ),
     failed: list(value.failed, "failed list").map((entry) =>
-      text(entry, "canister id"),
-    ),
-    retired: list(value.retired, "retired list").map((entry) =>
       text(entry, "canister id"),
     ),
   };
