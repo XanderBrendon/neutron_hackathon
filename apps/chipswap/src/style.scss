@@ -443,6 +443,12 @@
     align-items: start;
   }
 
+  /* The grid above outranks the browser's own `[hidden]` rule, so the
+     collapsed disclosure needs its own way to stay out of the layout. */
+  .chipswap-filter-grid[hidden] {
+    display: none;
+  }
+
   /* The facets are a group rather than a row of independent boxes, so they
      span the grid instead of competing with the selects for a column. */
   .chipswap-facets {
