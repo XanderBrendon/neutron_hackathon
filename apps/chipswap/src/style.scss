@@ -263,25 +263,32 @@
     gap: 4px;
   }
 
-  .chipswap-brush-row {
-    align-items: center;
-    display: inline-flex;
-    gap: 2px;
-  }
-
   /* The glyph says which brush this is, so the button is sized for the mark
-     rather than for a label. */
+     rather than for a label, and sized generously: a one-pixel brush has only
+     a speck to show for itself. */
   .chipswap-brush-button {
-    block-size: var(--nt-control-sm);
-    inline-size: var(--nt-control-sm);
+    block-size: 56px;
+    inline-size: 56px;
     padding: 0;
   }
 
   .chipswap-brush-glyph {
-    block-size: 20px;
+    block-size: 40px;
     display: block;
     fill: currentColor;
-    inline-size: 20px;
+    inline-size: 40px;
+  }
+
+  .chipswap-brush-custom {
+    display: grid;
+    gap: var(--nt-gap-2);
+  }
+
+  .chipswap-brush-custom-head {
+    align-items: center;
+    display: flex;
+    gap: var(--nt-gap-2);
+    justify-content: space-between;
   }
 
   .chipswap-brush-editor {

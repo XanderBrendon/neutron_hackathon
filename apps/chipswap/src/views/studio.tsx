@@ -79,6 +79,10 @@ export const Studio = ({ status, onChanged }: Props) => {
   const [customBrushes, setCustomBrushes] = useState<Brush[]>([]);
   const [brushDraft, setBrushDraft] = useState<Brush | null>(null);
   const [brushName, setBrushName] = useState("");
+  // Deleting a brush is rare and unrecoverable, so it lives behind a mode
+  // rather than behind a small cross beside every brush.
+  const [editingBrushes, setEditingBrushes] = useState(false);
+  const [markedBrushes, setMarkedBrushes] = useState<string[]>([]);
   const [newColor, setNewColor] = useState("#7fd1c1");
   const [picker, setPicker] = useState(false);
   const [blendFrom, setBlendFrom] = useState(0);
@@ -178,6 +182,36 @@ export const Studio = ({ status, onChanged }: Props) => {
     [customBrushes],
   );
   const brush = brushes.find((candidate) => candidate.id === brushId) ?? PRESET_BRUSHES[0]!;
+
+  // While the custom row is being edited a click marks a brush for deletion
+  // instead of choosing it to paint with, and the mark outranks the accent so
+  // it is never in doubt which brushes are about to go.
+  const brushButton = (candidate: Brush) => {
+    const editing = editingBrushes && candidate.id.startsWith("custom-");
+    const marked = editing && markedBrushes.includes(candidate.id);
+    return (
+      <button
+        aria-label={
+          editing
+            ? `Select brush ${candidate.name} for deletion`
+            : `Brush ${candidate.name}`
+        }
+        aria-pressed={editing ? marked : candidate.id === brushId}
+        className={cx("nt-button nt-button--sm chipswap-brush-button", {
+          "nt-button--secondary": !marked && candidate.id !== brushId,
+          "nt-button--danger": marked,
+        })}
+        key={candidate.id}
+        onClick={() =>
+          editing ? toggleMarkedBrush(candidate.id) : setBrushId(candidate.id)
+        }
+        title={candidate.name}
+        type="button"
+      >
+        <BrushGlyph brush={candidate} />
+      </button>
+    );
+  };
 
   // A drag is one edit: the first cell opens the stroke and the rest extend it,
   // so undo steps back over the whole line rather than one pixel at a time.
@@ -370,12 +404,28 @@ export const Studio = ({ status, onChanged }: Props) => {
       setMessage(`Brush "${name}" saved.`);
     });
 
-  const handleDeleteBrush = (id: string) =>
+  const toggleMarkedBrush = (id: string) =>
+    setMarkedBrushes((marked) =>
+      marked.includes(id)
+        ? marked.filter((entry) => entry !== id)
+        : [...marked, id],
+    );
+
+  const stopEditingBrushes = () => {
+    setEditingBrushes(false);
+    setMarkedBrushes([]);
+  };
+
+  const handleDeleteBrushes = () =>
     run(async () => {
-      const numeric = Number(id.replace("custom-", ""));
-      await deleteBrush(numeric);
-      if (brushId === id) setBrushId("dot");
+      for (const id of markedBrushes) {
+        await deleteBrush(Number(id.replace("custom-", "")));
+        if (brushId === id) setBrushId("dot");
+      }
+      const count = markedBrushes.length;
+      stopEditingBrushes();
       await reloadBrushes();
+      setMessage(count === 1 ? "Brush deleted." : `${count} brushes deleted.`);
     });
 
   const generator = GENERATORS.find((entry) => entry.id === generatorId)!;
@@ -790,34 +840,47 @@ export const Studio = ({ status, onChanged }: Props) => {
           <section className="nt-section">
             <h3 className="nt-section-title">Brush</h3>
             <div className="chipswap-brushes">
-              {brushes.map((candidate) => (
-                <span className="chipswap-brush-row" key={candidate.id}>
+              {PRESET_BRUSHES.map((candidate) => brushButton(candidate))}
+            </div>
+            {customBrushes.length > 0 ? (
+              <div className="chipswap-brush-custom">
+                <div className="chipswap-brush-custom-head">
+                  <span className="nt-label">Custom</span>
                   <button
-                    aria-label={`Brush ${candidate.name}`}
-                    aria-pressed={candidate.id === brushId}
-                    className={cx("nt-button nt-button--sm chipswap-brush-button", {
-                      "nt-button--secondary": candidate.id !== brushId,
-                    })}
-                    onClick={() => setBrushId(candidate.id)}
-                    title={candidate.name}
+                    aria-pressed={editingBrushes}
+                    className="nt-button nt-button--ghost nt-button--sm"
+                    onClick={() =>
+                      editingBrushes ? stopEditingBrushes() : setEditingBrushes(true)
+                    }
                     type="button"
                   >
-                    <BrushGlyph brush={candidate} />
+                    {editingBrushes ? "Done" : "Edit"}
                   </button>
-                  {candidate.id.startsWith("custom-") ? (
-                    <button
-                      aria-label={`Delete brush ${candidate.name}`}
-                      className="nt-icon-button"
-                      disabled={busy}
-                      onClick={() => void handleDeleteBrush(candidate.id)}
-                      type="button"
-                    >
-                      ×
-                    </button>
-                  ) : null}
-                </span>
-              ))}
-            </div>
+                </div>
+                <div className="chipswap-brushes">
+                  {customBrushes.map((candidate) => brushButton(candidate))}
+                </div>
+                {editingBrushes ? (
+                  <>
+                    <div className="nt-cluster">
+                      <button
+                        className="nt-button nt-button--danger nt-button--sm"
+                        disabled={busy || markedBrushes.length === 0}
+                        onClick={handleDeleteBrushes}
+                        type="button"
+                      >
+                        {markedBrushes.length === 1
+                          ? "Delete 1 brush"
+                          : `Delete ${markedBrushes.length} brushes`}
+                      </button>
+                    </div>
+                    <p className="nt-help">
+                      Pick the brushes to delete. Deleting one is permanent.
+                    </p>
+                  </>
+                ) : null}
+              </div>
+            ) : null}
             {brushDraft ? (
               <div className="chipswap-brush-editor">
                 <div
