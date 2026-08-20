@@ -58,6 +58,8 @@ export const Studio = ({ status, onChanged }: Props) => {
   const [selectedId, setSelectedId] = useState<number | null>(null);
   const [editor, setEditor] = useState<EditorState | null>(null);
   const [tool, setTool] = useState<Tool>("paint");
+  // A drawing aid, not part of the chip: it stays out of the saved artwork.
+  const [centerlines, setCenterlines] = useState(false);
   const [brushId, setBrushId] = useState("dot");
   const [customBrushes, setCustomBrushes] = useState<Brush[]>([]);
   const [brushDraft, setBrushDraft] = useState<Brush | null>(null);
@@ -388,14 +390,27 @@ export const Studio = ({ status, onChanged }: Props) => {
                   }}
                 />
               </label>
-              <span className="nt-meta">
-                revision {selected.revision}
-                {selected.state === "published"
-                  ? ` · ${selected.mintedCount} minted`
-                  : editor.dirty
-                    ? " · unsaved changes"
-                    : ""}
-              </span>
+              <div className="nt-cluster chipswap-stage-head-end">
+                <span className="nt-meta">
+                  revision {selected.revision}
+                  {selected.state === "published"
+                    ? ` · ${selected.mintedCount} minted`
+                    : editor.dirty
+                      ? " · unsaved changes"
+                      : ""}
+                </span>
+                <button
+                  aria-pressed={centerlines}
+                  className={cx("nt-button nt-button--sm", {
+                    "nt-button--secondary": !centerlines,
+                  })}
+                  onClick={() => setCenterlines((shown) => !shown)}
+                  title="Mark the middle row and column of the chip"
+                  type="button"
+                >
+                  Centre lines
+                </button>
+              </div>
             </div>
 
             <ChipCanvas
@@ -406,6 +421,7 @@ export const Studio = ({ status, onChanged }: Props) => {
               palette={editor.palette}
               pixels={shownPixels}
               scale={12}
+              showCenterlines={centerlines}
               showGrid
             />
 

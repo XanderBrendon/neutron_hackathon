@@ -3,17 +3,43 @@
 // second canvas on top carries the lock hatch and the pixel grid, which need
 // sub-cell drawing and must not disturb the artwork underneath. Both follow the
 // circular mask, so the corners of the square are blank rather than looking
-// like cells nobody is allowed to paint.
+// like cells nobody is allowed to paint. The optional centreline accent is the
+// same geometry drawn heavier over the middle row and column.
 
 import { useCallback, useEffect, useRef } from "react";
-import { DIAMETER, maskCells, maskEdges, pixelIndexAt } from "./chip.ts";
+import {
+  DIAMETER,
+  centerEdges,
+  maskCells,
+  maskEdges,
+  pixelIndexAt,
+  type MaskEdge,
+} from "./chip.ts";
 import { parseHexColor } from "./palette.ts";
 
 export type PaintPhase = "start" | "move" | "end";
 
-// Chip geometry never changes, so the overlay walks two shared tables.
+// Chip geometry never changes, so the overlay walks shared tables.
 const MASK_CELLS = maskCells();
 const MASK_EDGES = maskEdges();
+const CENTER_EDGES = centerEdges();
+
+/** Strokes a run of cell edges as one path, `at` placing a cell boundary. */
+const strokeEdges = (
+  context: CanvasRenderingContext2D,
+  edges: MaskEdge[],
+  at: (step: number) => number,
+) => {
+  context.beginPath();
+  for (const { orientation, x, y } of edges) {
+    const left = at(x);
+    const top = at(y);
+    context.moveTo(left, top);
+    if (orientation === "vertical") context.lineTo(left, at(y + 1));
+    else context.lineTo(at(x + 1), top);
+  }
+  context.stroke();
+};
 
 export type ChipCanvasProps = {
   pixels: Uint8Array;
@@ -21,6 +47,7 @@ export type ChipCanvasProps = {
   locks?: Uint8Array | undefined;
   scale?: number | undefined;
   showGrid?: boolean | undefined;
+  showCenterlines?: boolean | undefined;
   className?: string | undefined;
   label: string;
   onPaint?: ((x: number, y: number, phase: PaintPhase) => void) | undefined;
@@ -32,6 +59,7 @@ export const ChipCanvas = ({
   locks,
   scale = 8,
   showGrid = false,
+  showCenterlines = false,
   className,
   label,
   onPaint,
@@ -81,23 +109,26 @@ export const ChipCanvas = ({
     if (!context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
 
-    // Half-pixel offsets keep a one-pixel line crisp on the device grid.
-    const edge = (step: number) => Math.round(step * scale) + 0.5;
+    // An odd line width lands crisply when centred half a pixel off the cell
+    // boundary; an even one lands crisply on the boundary itself.
+    const thin = (step: number) => Math.round(step * scale) + 0.5;
+    const thick = (step: number) => Math.round(step * scale);
+    const accentWidth = 2 * Math.max(1, Math.round(scale / 12));
 
     if (showGrid && scale >= 6) {
-      context.strokeStyle = "rgba(242, 245, 247, 0.12)";
-      context.lineWidth = 1;
       // Only the lines that bound a chip pixel, so the corners of the square
       // stay empty and the chip's silhouette comes out of the outermost cells.
-      context.beginPath();
-      for (const { orientation, x, y } of MASK_EDGES) {
-        const left = edge(x);
-        const top = edge(y);
-        context.moveTo(left, top);
-        if (orientation === "vertical") context.lineTo(left, edge(y + 1));
-        else context.lineTo(edge(x + 1), top);
-      }
-      context.stroke();
+      context.strokeStyle = "rgba(242, 245, 247, 0.12)";
+      context.lineWidth = 1;
+      strokeEdges(context, MASK_EDGES, thin);
+    }
+
+    if (showCenterlines && scale >= 6) {
+      // Laid over the grid, so the middle row and column read as a band
+      // through the chip rather than as another pair of gridlines.
+      context.strokeStyle = "rgba(242, 245, 247, 0.5)";
+      context.lineWidth = accentWidth;
+      strokeEdges(context, CENTER_EDGES, thick);
     }
 
     if (!locks) return;
@@ -112,7 +143,7 @@ export const ChipCanvas = ({
       context.lineTo(left + scale - 1, top + 1);
     }
     context.stroke();
-  }, [locks, scale, showGrid]);
+  }, [locks, scale, showCenterlines, showGrid]);
 
   const cellFromEvent = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {

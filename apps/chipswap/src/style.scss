@@ -151,6 +151,11 @@
     width: 100%;
   }
 
+  .chipswap-stage-head-end {
+    gap: var(--nt-gap-2);
+    justify-content: flex-end;
+  }
+
   .chipswap-editor-canvas {
     max-width: 100%;
   }

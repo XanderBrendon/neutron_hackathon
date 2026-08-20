@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  CENTER,
   DIAMETER,
   PIXEL_COUNT,
   ROW_OFFSETS,
@@ -7,6 +8,7 @@ import {
   SHAPE_ID,
   decodePixels,
   encodePixels,
+  centerEdges,
   maskCells,
   maskEdges,
   maskRowWidths,
@@ -110,6 +112,34 @@ test("the mask's edges are listed once each", () => {
   expect(drawn.has("vertical:0:0")).toBe(false);
   expect(drawn.has("horizontal:0:0")).toBe(false);
   expect(drawn.has("vertical:31:30")).toBe(false);
+});
+
+test("the centre accent frames the middle row and column", () => {
+  const edges = centerEdges();
+  const keys = edges.map(({ orientation, x, y }) => `${orientation}:${x}:${y}`);
+
+  expect(CENTER).toBe(15);
+  expect(new Set(keys).size).toBe(keys.length);
+
+  // Two lines above and below the middle row, two either side of the middle
+  // column: the row and column that meet at the centre pixel are boxed in.
+  const expected = new Set<string>();
+  for (let x = 0; x < DIAMETER; x += 1) {
+    expected.add(`horizontal:${x}:${CENTER}`);
+    expected.add(`horizontal:${x}:${CENTER + 1}`);
+  }
+  for (let y = 0; y < DIAMETER; y += 1) {
+    expected.add(`vertical:${CENTER}:${y}`);
+    expected.add(`vertical:${CENTER + 1}:${y}`);
+  }
+  expect(new Set(keys)).toEqual(expected);
+
+  // The accent is drawn over the grid, so it may only thicken lines the grid
+  // already has: none of it reaches into the bare corners.
+  const grid = new Set(
+    maskEdges().map(({ orientation, x, y }) => `${orientation}:${x}:${y}`),
+  );
+  for (const key of keys) expect(grid.has(key)).toBe(true);
 });
 
 test("pixels round-trip through lowercase hex", () => {

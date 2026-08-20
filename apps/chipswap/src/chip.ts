@@ -5,6 +5,8 @@
 
 export const SHAPE_ID = "circle31";
 export const DIAMETER = 31;
+/** Row and column of the middle pixel: the chip is an odd number wide. */
+export const CENTER = (DIAMETER - 1) / 2;
 export const MAX_PALETTE = 64;
 
 export const ROW_WIDTHS: readonly number[] = [
@@ -103,6 +105,22 @@ export function maskEdges(): MaskEdge[] {
     }
     if (pixelIndexAt(x, y + 1) === null) {
       edges.push({ orientation: "horizontal", x, y: y + 1 });
+    }
+  }
+  return edges;
+}
+
+/** The lines boxing in the middle row and the middle column, once each. */
+export function centerEdges(): MaskEdge[] {
+  const edges: MaskEdge[] = [];
+  for (const { x, y } of maskCells()) {
+    if (y === CENTER) {
+      edges.push({ orientation: "horizontal", x, y });
+      edges.push({ orientation: "horizontal", x, y: y + 1 });
+    }
+    if (x === CENTER) {
+      edges.push({ orientation: "vertical", x, y });
+      edges.push({ orientation: "vertical", x: x + 1, y });
     }
   }
   return edges;
