@@ -13,7 +13,7 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v4";
+import Memory "./memory/chipswap/v5";
 import PrincipalText "./PrincipalText";
 import Requirements "./Requirements";
 import Shape "./Shape";
@@ -467,6 +467,11 @@ module {
         let appCalls = env.app_calls;
         let calls = env.capabilities.backend_calls;
         let self = calls.canister_principal;
+
+        // Runs on install and on every upgrade, and is a no-op after the first:
+        // the only way this canister's own address reaches the directory is the
+        // seed of a clean install landing on the seeded canister.
+        ignore Directory.dropSelf(mem, self);
 
         // --- Queries --------------------------------------------------------
 

@@ -364,7 +364,16 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                       ) : null}
                     </td>
                     <td>
-                      <span className="nt-tag">{entry.source}</span>
+                      <span
+                        className="nt-tag"
+                        title={
+                          entry.source === "seed"
+                            ? "Chipswap was installed knowing this designer, so a new directory is not empty. Remove or ignore them like any other."
+                            : undefined
+                        }
+                      >
+                        {entry.source}
+                      </span>
                       {entry.ignored ? (
                         <span className="nt-tag nt-tag--warning">ignored</span>
                       ) : null}

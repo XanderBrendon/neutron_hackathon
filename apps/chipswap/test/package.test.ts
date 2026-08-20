@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 110,
+    version: 112,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -56,20 +56,27 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     ],
     // Every released schema stays exactly as released, so each persistent change
     // adds a version beside its predecessors. The edges are linear and complete,
-    // which is what lets a canister still on v1 reach v4 in one upgrade.
+    // which is what lets a canister still on v1 reach v5 in one upgrade.
+    //
+    // V5 is the case the rule exists for that is easiest to get wrong: it
+    // changes no type at all, only what a clean install starts with, and a
+    // clean-install default is exactly as immutable at a released version as a
+    // field is.
     memory: {
       chipswap: {
-        version: 4,
+        version: 5,
         schemas: {
           1: { src: "memory/chipswap/v1.mo" },
           2: { src: "memory/chipswap/v2.mo" },
           3: { src: "memory/chipswap/v3.mo" },
           4: { src: "memory/chipswap/v4.mo" },
+          5: { src: "memory/chipswap/v5.mo" },
         },
         migrations: [
           { from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" },
           { from: 2, to: 3, src: "memory/chipswap/v2_to_v3.mo" },
           { from: 3, to: 4, src: "memory/chipswap/v3_to_v4.mo" },
+          { from: 4, to: 5, src: "memory/chipswap/v4_to_v5.mo" },
         ],
       },
     },

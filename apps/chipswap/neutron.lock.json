@@ -19,12 +19,17 @@
         "4": {
           "hash": "86943edca661163c9047f9643199df328599d529579a8d65bcbe55eaa1a4aa8e",
           "entry": "1a07a4f2cd04ffdddd5a38ba656cbd5bae90d307b449f0fcf6c3374f177be7db"
+        },
+        "5": {
+          "hash": "7fb0acfa9fe8fa40c3256a7c9dcaf9c22149ee0ab02427101aea8b65852f49ef",
+          "entry": "dab331c50680d64a7da83c10f2ac5a7fefb2cd4485542439538a447ede5f24b4"
         }
       },
       "migrations": {
         "1->2": "d5d69543440e36496daacf4a60e249557dd176a207c84b64e714cc2f6fd0f3db",
         "2->3": "c1f4e809df0d1d3cfd2032c832c83b8e099b262ed72d630920594da095e93718",
-        "3->4": "32ddd9e1ae82ff9de46b002253c57b99b261647c146ea6862a17cd83d426b842"
+        "3->4": "32ddd9e1ae82ff9de46b002253c57b99b261647c146ea6862a17cd83d426b842",
+        "4->5": "7a9df0ffb3ecfdcde67724497c719cef991eef307e777e2d6e77c4fe63f54b1c"
       }
     }
   }

@@ -8,8 +8,11 @@ import Text "mo:core/Text";
 import Migrate "../backend/memory/chipswap/v1_to_v2";
 import Migrate3 "../backend/memory/chipswap/v2_to_v3";
 import Migrate4 "../backend/memory/chipswap/v3_to_v4";
+import Migrate5 "../backend/memory/chipswap/v4_to_v5";
 import V1 "../backend/memory/chipswap/v1";
 import V3 "../backend/memory/chipswap/v3";
+import V4 "../backend/memory/chipswap/v4";
+import V5 "../backend/memory/chipswap/v5";
 
 // Migration from the released schemas, with something in every root. Compiling
 // proves the shapes line up; only this proves the values arrive intact and that
@@ -467,3 +470,68 @@ let ?replay4 = Map.get(current.replay, Text.compare, "replay") else Runtime.trap
 assert (replay4.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
 let ?brush4 = List.get(current.brushes, 0) else Runtime.trap("missing brush");
 assert (brush4.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+
+// --- The fourth leg: V4 -> V5 ------------------------------------------------
+
+// V5's only change is what a clean install starts with, so the migration's job
+// is to do nothing at all to an installed directory. That is worth asserting
+// rather than assuming, because the tempting version of this migration — seed
+// everyone, they will thank us — hands an address to owners who never asked for
+// one and re-adds a designer somebody removed on purpose.
+let latest = Migrate5.migrate(current);
+
+// The seed is not among them. Nobody upgrading gains an entry.
+assert (Map.size(latest.directory) == Map.size(current.directory));
+switch (Map.get(latest.directory, Principal.compare, V5.seedDesigner())) {
+    case null {};
+    case (?_) Runtime.trap("an upgrade planted the seed designer");
+};
+for ((_, entry) in Map.entries(latest.directory)) {
+    assert (entry.source != #seed);
+};
+
+// The entries that were there arrive as themselves, decision fields included.
+let ?carried = Map.get(latest.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+assert (carried.source == #contacts);
+assert (carried.ignored);
+assert (carried.first_seen_ns == 5);
+assert (carried.last_seen_ns == 6);
+assert (carried.last_catalog_ns == ?7);
+assert (carried.design_count == 2);
+let ?crawled = Map.get(latest.directory, Principal.compare, exchangedPeer) else Runtime.trap("missing entry");
+assert (crawled.source == #crawl);
+
+// And so does everything the directory is not: designs, the escrowed chip, the
+// replay record and the brush have now survived four conversions.
+assert (latest.revision == current.revision);
+assert (latest.next_request_seq == current.next_request_seq);
+assert (latest.next_brush_id == current.next_brush_id);
+let ?draft5 = Map.get(latest.designs, Nat.compare, 3) else Runtime.trap("missing design");
+assert (draft5.state == #draft);
+assert (draft5.title == "Design 3");
+assert (draft5.requirements.approval);
+assert (draft5.art.pixels == Blob.fromArray([0, 1, 0]));
+let ?sent5 = Map.get(latest.holdings, Text.compare, "sent") else Runtime.trap("missing chip");
+switch (sent5.state) {
+    case (#escrowed(details)) assert (details.request_id == requestId);
+    case (_) Runtime.trap("escrow was not preserved");
+};
+assert (Map.size(latest.incoming) == Map.size(current.incoming));
+assert (Map.size(latest.outgoing) == Map.size(current.outgoing));
+let ?replay5 = Map.get(latest.replay, Text.compare, "replay") else Runtime.trap("missing replay");
+assert (replay5.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
+let ?brush5 = List.get(latest.brushes, 0) else Runtime.trap("missing brush");
+assert (brush5.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+// An installed canister whose owner emptied their directory keeps it empty. The
+// seed is what an install begins with, not a correction an upgrade applies.
+let emptied = Migrate5.migrate(V4.init());
+assert (Map.size(emptied.directory) == 0);
+
+// A crawl does not survive an upgrade, the same way it did not survive the last
+// one: the peers it was midway through asking are a live call graph, not state.
+switch (emptied.crawl) {
+    case null {};
+    case (?_) Runtime.trap("a migration started a crawl");
+};

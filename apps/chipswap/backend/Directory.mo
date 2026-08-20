@@ -9,16 +9,20 @@ import Text "mo:core/Text";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Designs "./Designs";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v4";
+import Memory "./memory/chipswap/v5";
 import Set "mo:core/Set";
 import Requirements "./Requirements";
 
 // The designer directory, the cached catalogs the store reads from, and the
 // crawl that fills both.
 //
-// Nothing arrives here unasked. A designer is in this table because the owner
-// typed them in, because they proposed a trade, or because a crawl the owner
-// started read them out of a peer's directory.
+// Nothing arrives here unasked, with one exception the table names out loud. A
+// designer is here because the owner typed them in, because they proposed a
+// trade, or because a crawl the owner started read them out of a peer's
+// directory. The exception is the `#seed` entry a clean install begins with,
+// which exists because every one of those routes needs somebody already in the
+// table to start from. It is labelled as what it is and removed like anything
+// else.
 //
 // An ignored entry is inert in every outward direction. It is not fetched from,
 // not crawled, not served to peers, and not read by the store, but it is still
@@ -240,6 +244,20 @@ module {
             };
             case null false;
         };
+    };
+
+    // This canister is never a designer in its own directory, and every route
+    // that writes one already says so: `chipswap_directory_add` refuses its own
+    // address, a crawl and a trade both go through `noteExcludingSelf`, and the
+    // page served to peers filters it out again on the way out.
+    //
+    // The seed a clean install ships with is the one entry written before this
+    // canister knows what its own address is, so it is the one the filters
+    // cannot cover — and the owner of the seeded address installing Chipswap is
+    // exactly the case that produces it. Dropping it at construction keeps the
+    // invariant true of the table itself rather than of each reader of it.
+    public func dropSelf(mem : Memory.Mem, self : Principal) : Bool {
+        remove(mem, self);
     };
 
     public type ServedPage = {
@@ -741,10 +759,13 @@ module {
     };
 
     // An entry the owner put here on purpose, rather than one that arrived.
+    // The seed is neither chosen nor, by the time this matters, needed: a table
+    // at its limit has found five hundred designers, which is what the seed was
+    // there to start.
     func chosen(entry : Memory.DirectoryEntry) : Bool {
         switch (entry.source) {
             case (#manual or #contacts) true;
-            case (#trade or #crawl) false;
+            case (#trade or #crawl or #seed) false;
         };
     };
 
@@ -815,6 +836,7 @@ module {
             case (#contacts) "contacts";
             case (#trade) "trade";
             case (#crawl) "crawl";
+            case (#seed) "seed";
         };
     };
 

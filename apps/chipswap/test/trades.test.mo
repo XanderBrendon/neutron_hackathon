@@ -8,7 +8,7 @@ import Text "mo:core/Text";
 import Designs "../backend/Designs";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v4";
+import Memory "../backend/memory/chipswap/v5";
 import Shape "../backend/Shape";
 import Trades "../backend/Trades";
 import Wire "../backend/Wire";

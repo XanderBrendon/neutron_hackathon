@@ -8,7 +8,7 @@ import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v4";
+import Memory "../backend/memory/chipswap/v5";
 import Shape "../backend/Shape";
 
 func principalOf(seed : Nat) : Principal {
@@ -20,6 +20,16 @@ func principalOf(seed : Nat) : Principal {
             1,
         ])
     );
+};
+
+// Every fixture below builds the exact table it means to test, so it starts
+// from a blank one rather than from the clean install. `init()` now ships with
+// the seed designer, and counting an entry these tests never put there would
+// make each assertion say one thing and check another.
+func blank() : Memory.Mem {
+    let mem = Memory.init();
+    Map.remove(mem.directory, Principal.compare, Memory.seedDesigner());
+    mem;
 };
 
 let self = principalOf(1);
@@ -71,7 +81,7 @@ func chip(designer : Principal, designId : Nat, serial : Nat) : Memory.Chip {
     };
 };
 
-let mem = Memory.init();
+let mem = blank();
 
 // A canister is noted once; later sightings only refresh the timestamp.
 assert (Directory.note(mem, alice, #manual, 100));
@@ -102,7 +112,7 @@ assert (Directory.remove(mem, alice) == false);
 // Eviction protects the designers the owner chose, the ones whose chips we
 // hold, and the ones a flag says something about. A crawl arriving with five
 // hundred names must not be able to push out a principal typed in by hand.
-let evicting = Memory.init();
+let evicting = blank();
 assert (Directory.note(evicting, alice, #manual, 10));
 assert (Directory.note(evicting, bob, #trade, 11));
 switch (Holdings.admit(evicting, chip(bob, 1, 1))) {
@@ -127,7 +137,7 @@ assert (Directory.get(evicting, carol) != null);
 assert (Directory.ignored(evicting, carol));
 
 // Catalogs are cached per designer and evicted least-recently-fetched first.
-let store = Memory.init();
+let store = blank();
 ignore Directory.note(store, alice, #manual, 1);
 ignore Directory.note(store, bob, #manual, 1);
 Directory.storeCatalog(store, alice, [cachedDesign(1, OPEN, false), cachedDesign(2, APPROVES, false)], 50);
@@ -154,7 +164,7 @@ assert (Map.get(store.catalog_cache, Principal.compare, bob) != null);
 
 // The filter axes apply independently and together, and the page they produce
 // reports the filtered total rather than the cached one.
-let rows = Memory.init();
+let rows = blank();
 Directory.storeCatalog(
     rows,
     alice,
@@ -290,7 +300,7 @@ func seedCatalogs(mem : Memory.Mem) {
 };
 
 // Nothing to offer means nothing is tradeable, however open the designs are.
-let empty = Memory.init();
+let empty = blank();
 seedCatalogs(empty);
 assert (Directory.storeRows(empty, plain("all", "show"), 0, 50).total == 3);
 assert (tradeableIn(empty) == 0);
@@ -298,7 +308,7 @@ assert (tradeableIn(empty) == 0);
 // A one-color chip satisfies the two that ask nothing of the artwork, and the
 // approval design among them: approval decides what happens to an offer that
 // already qualifies, not whether it qualifies.
-let plainChip = Memory.init();
+let plainChip = blank();
 seedCatalogs(plainChip);
 switch (Holdings.admit(plainChip, chipOf(carol, 9, art, false))) {
     case (#ok(())) {};
@@ -307,7 +317,7 @@ switch (Holdings.admit(plainChip, chipOf(carol, 9, art, false))) {
 assert (tradeableIn(plainChip) == 2);
 
 // Six colors clears the six-color minimum, so the picky design joins them.
-let sixColors = Memory.init();
+let sixColors = blank();
 seedCatalogs(sixColors);
 switch (Holdings.admit(sixColors, chipOf(carol, 9, colorful, false))) {
     case (#ok(())) {};
@@ -316,20 +326,20 @@ switch (Holdings.admit(sixColors, chipOf(carol, 9, colorful, false))) {
 assert (tradeableIn(sixColors) == 3);
 
 // A published design of our own counts too: offering one mints a fresh copy.
-let ownPublished = Memory.init();
+let ownPublished = blank();
 seedCatalogs(ownPublished);
 Map.add(ownPublished.designs, Nat.compare, 1, ownDesign(1, colorful, #published));
 assert (tradeableIn(ownPublished) == 3);
 
 // A draft is not a candidate. It cannot be offered, so it must not make a
 // design look reachable that is not.
-let ownDraft = Memory.init();
+let ownDraft = blank();
 seedCatalogs(ownDraft);
 Map.add(ownDraft.designs, Nat.compare, 1, ownDesign(1, colorful, #draft));
 assert (tradeableIn(ownDraft) == 0);
 
 // Neither is a chip already committed to a trade in flight.
-let escrowed = Memory.init();
+let escrowed = blank();
 seedCatalogs(escrowed);
 switch (Holdings.admit(escrowed, chipOf(carol, 9, colorful, false))) {
     case (#ok(())) {};
@@ -343,7 +353,7 @@ assert (tradeableIn(escrowed) == 0);
 
 // The tag rule is measured against the offered chip's own tag, so a tagged
 // chip cannot satisfy a design that refuses tagged ones.
-let refusesTagged = Memory.init();
+let refusesTagged = blank();
 Directory.storeCatalog(refusesTagged, alice, [cachedDesign(1, { OPEN with nsfw = ?#disallowed }, false)], 10);
 switch (Holdings.admit(refusesTagged, chipOf(carol, 9, colorful, true))) {
     case (#ok(())) {};
@@ -358,7 +368,7 @@ assert (tradeableIn(refusesTagged) == 1);
 
 // --- Search, designer, and order --------------------------------------------
 
-let sorting = Memory.init();
+let sorting = blank();
 Directory.storeCatalog(
     sorting,
     alice,
@@ -454,7 +464,7 @@ assert (Directory.validFilter(filterOf("all", "hide", [], null, repeatA(Director
 
 // Ignoring reaches three places at once: what we fetch, what we pass on, and
 // what the store shows. The entry itself stays, which is the whole point.
-let ignoring = Memory.init();
+let ignoring = blank();
 ignore Directory.note(ignoring, alice, #manual, 10);
 ignore Directory.note(ignoring, bob, #manual, 20);
 Directory.storeCatalog(ignoring, alice, [cachedDesign(1, OPEN, false)], 30);
@@ -510,7 +520,7 @@ assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 1);
 // The page a peer reads is ordered by principal, not by when we last saw the
 // designer. A crawler walks this in several calls, and an order that shifts
 // between them would make it skip some entries and read others twice.
-let serving = Memory.init();
+let serving = blank();
 var servingSeed = 20_000;
 while (Map.size(serving.directory) < 5) {
     ignore Directory.note(serving, principalOf(servingSeed), #crawl, 100 - servingSeed);
@@ -558,7 +568,7 @@ for (candidate in filtered.entries.values()) {
 
 // A designer earns retirement over three consecutive unanswered calls, and any
 // reply at all resets the count. One bad moment is not an uninstall.
-let strikes = Memory.init();
+let strikes = blank();
 ignore Directory.note(strikes, alice, #manual, 1);
 assert (Directory.noteUnreachable(strikes, alice, 2) == false);
 assert (Directory.noteUnreachable(strikes, alice, 3) == false);
@@ -581,7 +591,7 @@ assert (Directory.reachable(strikes, alice) == false);
 // exactly one code in it is evidence about *them*. Everything else describes
 // something that happened on our side, or is an answer we could not read —
 // and an answer, however garbled, proves someone is home.
-let outcomes = Memory.init();
+let outcomes = blank();
 ignore Directory.note(outcomes, bob, #manual, 1);
 
 // Our own limits are not their fault, so they cost nothing.
@@ -638,7 +648,7 @@ assert (Directory.noteUnreachable(strikes, principalOf(998), 1) == false);
 
 // --- The crawl --------------------------------------------------------------
 
-let crawling = Memory.init();
+let crawling = blank();
 ignore Directory.note(crawling, alice, #manual, 1);
 ignore Directory.note(crawling, bob, #manual, 1);
 ignore Directory.note(crawling, carol, #manual, 1);
@@ -732,7 +742,7 @@ assert (Directory.strikeable("") == false);
 
 // A peer who claims a directory far larger than anyone can hold, and hands it
 // over one entry at a time, is paged to the honest ceiling and no further.
-let lying = Memory.init();
+let lying = blank();
 ignore Directory.note(lying, alice, #manual, 1);
 Directory.startCrawl(lying, 1);
 var lyingPages = 0;
@@ -769,7 +779,7 @@ for (target in Directory.crawlTargets(lying, 8).values()) {
 // arrives after a crawl was restarted describes a position in a walk that no
 // longer exists, and acting on it would mark a peer finished whose beginning
 // this crawl never read.
-let stale = Memory.init();
+let stale = blank();
 ignore Directory.note(stale, alice, #manual, 1);
 Directory.startCrawl(stale, 1);
 // Part-way through a long directory.
@@ -797,7 +807,7 @@ assert (Directory.get(stale, principalOf(66)) == null);
 // A cursor can outlive the entry it points at. Removing or ignoring a designer
 // whose directory is half-read takes them out of the batch as well as out of
 // the count, so the two never disagree about what is left.
-let orphaned = Memory.init();
+let orphaned = blank();
 ignore Directory.note(orphaned, alice, #manual, 1);
 ignore Directory.note(orphaned, bob, #manual, 1);
 Directory.startCrawl(orphaned, 1);
@@ -811,3 +821,40 @@ for (target in Directory.crawlTargets(orphaned, 8).values()) {
     assert (target.canister != bob);
 };
 assert (Directory.crawlProgress(orphaned).remaining == 2);
+
+// --- The seeded designer -----------------------------------------------------
+
+// The directory tells the owner where each entry came from, and the seed has to
+// be able to say "the app came with it". Borrowing one of the other four labels
+// would make the one entry they did not cause look like one they did.
+assert (Directory.sourceText(#seed) == "seed");
+
+// And it is an arrival, not a decision. A full table gives up the seed before
+// any designer the owner typed in, which is the right way round: the seed is
+// scaffolding for an empty directory, and a table at its limit is the one case
+// where it has plainly done its job.
+let seedEviction = blank();
+ignore Directory.note(seedEviction, Memory.seedDesigner(), #seed, 1);
+var seedFiller = 100;
+while (Map.size(seedEviction.directory) < Directory.MAX_DIRECTORY) {
+    ignore Directory.note(seedEviction, principalOf(seedFiller), #manual, 10 + seedFiller);
+    seedFiller += 1;
+};
+assert (Map.size(seedEviction.directory) == Directory.MAX_DIRECTORY);
+assert (Directory.note(seedEviction, principalOf(9_000), #crawl, 99_999));
+switch (Directory.get(seedEviction, Memory.seedDesigner())) {
+    case null {};
+    case (?_) Runtime.trap("a full table evicted a chosen designer over the seed");
+};
+
+// Nothing else about it is special. It is fetched from, served to peers, and
+// ignored on exactly the terms every other entry is.
+let seeded = blank();
+ignore Directory.note(seeded, Memory.seedDesigner(), #seed, 5);
+assert (Directory.reachable(seeded, Memory.seedDesigner()));
+assert (Directory.served(seeded, self, 0, 10).entries.size() == 1);
+assert (Directory.setIgnored(seeded, Memory.seedDesigner(), true));
+assert (not Directory.reachable(seeded, Memory.seedDesigner()));
+assert (Directory.served(seeded, self, 0, 10).entries.size() == 0);
+assert (Directory.remove(seeded, Memory.seedDesigner()));
+assert (Directory.get(seeded, Memory.seedDesigner()) == null);

@@ -56,11 +56,23 @@ peer never answers, the trade becomes `uncertain` and the chip stays committed
 until the `status` route says what actually happened — the app never restores a
 chip the other side may already hold.
 
-**Directory.** Nothing arrives in your directory unasked. A designer is there
-because you typed their address in, because you added them from Contacts,
-because they proposed a trade to you, or because you went looking. Nothing rides
-along on ordinary traffic, and there is no way to push yourself into someone
-else's list — you enter the graph by trading, and spread from there.
+**Directory.** Nothing arrives in your directory unasked, bar the single entry
+named below. A designer is there because you typed their address in, because you
+added them from Contacts, because they proposed a trade to you, or because you
+went looking. Nothing rides along on ordinary traffic, and there is no way to
+push yourself into someone else's list — you enter the graph by trading, and
+spread from there.
+
+**The one you start with.** Every route to a new designer needs a designer you
+already know: a catalog is fetched from someone in your list, a crawl asks the
+people in your list who *they* know, and a trade needs a design you can already
+see. An empty directory is therefore a dead end, so a new install begins with
+one address — `3wvx3-yaaaa-aaaay-aacuq-cai` — tagged `seed` to say plainly that
+you did not choose it. From there the graph is reachable. Remove it, ignore it,
+or trade with it; it is an ordinary entry in every respect, and it is the only
+one Chipswap ever puts in your list on your behalf. Upgrading an existing
+install adds nothing: the seed is what a directory starts as, not a correction
+applied to one you have already made your own.
 
 **Finding more designers.** *Find more designers* asks every designer you know
 for their directory, a page at a time, then asks whoever that turns up, until

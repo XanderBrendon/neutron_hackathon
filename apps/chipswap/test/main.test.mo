@@ -1,24 +1,29 @@
 import Array "mo:core/Array";
 import Blob "mo:core/Blob";
 import Nat8 "mo:core/Nat8";
+import Map "mo:core/Map";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Chipswap "../backend/main";
-import Memory "../backend/memory/chipswap/v4";
+import Memory "../backend/memory/chipswap/v5";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
 
 let self = Principal.fromBlob(Blob.fromArray([0, 0, 0, 0, 0, 16, 0, 1, 1, 1]));
 let peer = Principal.fromBlob(Blob.fromArray([0, 0, 0, 0, 0, 16, 0, 2, 1, 1]));
 
+// The walk below is about designs, trades and directory edits, so it starts
+// from a directory it controls entirely. What a clean install actually begins
+// with is asserted on its own at the end of this file.
 let memory = Memory.init();
+Map.remove(memory.directory, Principal.compare, Memory.seedDesigner());
 assert (memory.revision == 0);
 
 // Contacts is a declared install-time dependency; the stub stands in for the
 // installed address book.
-let environment : Chipswap.AppBackendEnvironment = {
-    stable_memory = { chipswap = memory };
+func environmentFor(mem : Memory.Mem, who : Principal) : Chipswap.AppBackendEnvironment = {
+    stable_memory = { chipswap = mem };
     app_calls = {
         contacts = {
             contacts_neutron_lookup_v2 = func(_request : { principal : Principal }) : Chipswap.NeutronContactLookupV2 {
@@ -33,7 +38,7 @@ let environment : Chipswap.AppBackendEnvironment = {
     };
     capabilities = {
         backend_calls = {
-            canister_principal = self;
+            canister_principal = who;
             can_call = func(_canister : Principal, _method : Text) : Bool { true };
             call = func(
                 _request : NeutronCapabilities.BackendCallRequestV1
@@ -47,6 +52,7 @@ let environment : Chipswap.AppBackendEnvironment = {
     };
 };
 
+let environment = environmentFor(memory, self);
 let chipswap = Chipswap.Init(environment);
 
 // A fresh installation reports its own address and an empty studio.
@@ -429,3 +435,35 @@ assert (finalStatus.revision > initial.revision);
 assert (finalStatus.published_count == 1);
 assert (finalStatus.holdings == 1);
 assert (finalStatus.directory_count == 1);
+
+
+// --- What an install starts with ---------------------------------------------
+
+// A clean install can reach the rest of the graph. Every route to a new
+// designer — fetching a catalog, crawling, being proposed a trade — needs
+// somebody already in the table, so one address ships with the app and an empty
+// directory is never what an owner is handed.
+let freshMemory = Memory.init();
+let fresh = Chipswap.Init(environmentFor(freshMemory, peer));
+let freshPage = fresh.chipswap_directory({ offset = 0; limit = 10 });
+assert (freshPage.total == 1);
+assert (freshPage.entries[0].canister == "3wvx3-yaaaa-aaaay-aacuq-cai");
+assert (freshPage.entries[0].source == "seed");
+assert (not freshPage.entries[0].ignored);
+assert (not freshPage.entries[0].retired);
+assert (fresh.chipswap_status(()).directory_count == 1);
+
+// Installed on the seeded canister itself, that address is this canister's own.
+// A Neutron cannot trade with itself, cannot crawl itself, and is already
+// filtered out of the page it serves peers, so the entry is not a designer at
+// all — it is a row that could only ever mislead. It goes.
+let ownMemory = Memory.init();
+let own = Chipswap.Init(environmentFor(ownMemory, Memory.seedDesigner()));
+assert (own.chipswap_directory({ offset = 0; limit = 10 }).total == 0);
+assert (own.chipswap_status(()).directory_count == 0);
+
+// Which is the same rule `chipswap_directory_add` already enforces by hand, and
+// it survives the upgrade that re-runs this: constructing again over the same
+// memory leaves nothing behind to clean up.
+let again = Chipswap.Init(environmentFor(ownMemory, Memory.seedDesigner()));
+assert (again.chipswap_directory({ offset = 0; limit = 10 }).total == 0);
