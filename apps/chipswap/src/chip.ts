@@ -64,6 +64,50 @@ export function pixelIndexAt(x: number, y: number): number | null {
   return ROW_OFFSETS[y]! + (x - start);
 }
 
+/**
+ * Chip-local coordinates of every pixel, in index order. Renderers walk this
+ * instead of the 31x31 square so the corners outside the circle stay blank.
+ */
+export function maskCells(): { x: number; y: number }[] {
+  const cells: { x: number; y: number }[] = [];
+  for (let y = 0; y < ROW_WIDTHS.length; y += 1) {
+    const start = rowStart(y);
+    for (let column = 0; column < ROW_WIDTHS[y]!; column += 1) {
+      cells.push({ x: start + column, y });
+    }
+  }
+  return cells;
+}
+
+/** A cell edge: vertical runs from (x, y) to (x, y + 1), horizontal to (x + 1, y). */
+export type MaskEdge = {
+  orientation: "vertical" | "horizontal";
+  x: number;
+  y: number;
+};
+
+/**
+ * Every grid line bounding the chip, listed once each. Stroking a rectangle per
+ * cell would be simpler, but it draws each shared edge twice, and a translucent
+ * line composited twice reads as a brighter line.
+ */
+export function maskEdges(): MaskEdge[] {
+  const edges: MaskEdge[] = [];
+  for (const { x, y } of maskCells()) {
+    // The left and top edges belong to this cell; the right and bottom ones
+    // belong to the neighbour, unless there is no neighbour to draw them.
+    edges.push({ orientation: "vertical", x, y });
+    edges.push({ orientation: "horizontal", x, y });
+    if (pixelIndexAt(x + 1, y) === null) {
+      edges.push({ orientation: "vertical", x: x + 1, y });
+    }
+    if (pixelIndexAt(x, y + 1) === null) {
+      edges.push({ orientation: "horizontal", x, y: y + 1 });
+    }
+  }
+  return edges;
+}
+
 /** Inverse of pixelIndexAt. */
 export function pixelPosition(index: number): { x: number; y: number } {
   if (!Number.isInteger(index) || index < 0 || index >= PIXEL_COUNT) {

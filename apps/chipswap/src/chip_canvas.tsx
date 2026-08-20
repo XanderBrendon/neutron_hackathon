@@ -1,13 +1,19 @@
 // The chip renderer. The base canvas is a real 31x31 image scaled by CSS with
 // pixelated smoothing, so a chip is always drawn at exact pixel boundaries. A
 // second canvas on top carries the lock hatch and the pixel grid, which need
-// sub-cell drawing and must not disturb the artwork underneath.
+// sub-cell drawing and must not disturb the artwork underneath. Both follow the
+// circular mask, so the corners of the square are blank rather than looking
+// like cells nobody is allowed to paint.
 
 import { useCallback, useEffect, useRef } from "react";
-import { DIAMETER, pixelIndexAt } from "./chip.ts";
+import { DIAMETER, maskCells, maskEdges, pixelIndexAt } from "./chip.ts";
 import { parseHexColor } from "./palette.ts";
 
 export type PaintPhase = "start" | "move" | "end";
+
+// Chip geometry never changes, so the overlay walks two shared tables.
+const MASK_CELLS = maskCells();
+const MASK_EDGES = maskEdges();
 
 export type ChipCanvasProps = {
   pixels: Uint8Array;
@@ -75,16 +81,21 @@ export const ChipCanvas = ({
     if (!context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
 
+    // Half-pixel offsets keep a one-pixel line crisp on the device grid.
+    const edge = (step: number) => Math.round(step * scale) + 0.5;
+
     if (showGrid && scale >= 6) {
       context.strokeStyle = "rgba(242, 245, 247, 0.12)";
       context.lineWidth = 1;
+      // Only the lines that bound a chip pixel, so the corners of the square
+      // stay empty and the chip's silhouette comes out of the outermost cells.
       context.beginPath();
-      for (let step = 0; step <= DIAMETER; step += 1) {
-        const position = Math.round(step * scale) + 0.5;
-        context.moveTo(position, 0);
-        context.lineTo(position, canvas.height);
-        context.moveTo(0, position);
-        context.lineTo(canvas.width, position);
+      for (const { orientation, x, y } of MASK_EDGES) {
+        const left = edge(x);
+        const top = edge(y);
+        context.moveTo(left, top);
+        if (orientation === "vertical") context.lineTo(left, edge(y + 1));
+        else context.lineTo(edge(x + 1), top);
       }
       context.stroke();
     }
@@ -93,15 +104,12 @@ export const ChipCanvas = ({
     context.strokeStyle = "rgba(242, 245, 247, 0.75)";
     context.lineWidth = Math.max(1, scale / 8);
     context.beginPath();
-    for (let y = 0; y < DIAMETER; y += 1) {
-      for (let x = 0; x < DIAMETER; x += 1) {
-        const index = pixelIndexAt(x, y);
-        if (index === null || locks[index] !== 1) continue;
-        const left = x * scale;
-        const top = y * scale;
-        context.moveTo(left + 1, top + scale - 1);
-        context.lineTo(left + scale - 1, top + 1);
-      }
+    for (const [index, { x, y }] of MASK_CELLS.entries()) {
+      if (locks[index] !== 1) continue;
+      const left = x * scale;
+      const top = y * scale;
+      context.moveTo(left + 1, top + scale - 1);
+      context.lineTo(left + scale - 1, top + 1);
     }
     context.stroke();
   }, [locks, scale, showGrid]);

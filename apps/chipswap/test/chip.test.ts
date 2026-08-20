@@ -7,6 +7,8 @@ import {
   SHAPE_ID,
   decodePixels,
   encodePixels,
+  maskCells,
+  maskEdges,
   maskRowWidths,
   pixelIndexAt,
   pixelPosition,
@@ -60,6 +62,54 @@ test("pixel positions invert the lookup for every index", () => {
   }
   expect(() => pixelPosition(PIXEL_COUNT)).toThrow();
   expect(() => pixelPosition(-1)).toThrow();
+});
+
+test("mask cells are the chip's pixels and nothing else", () => {
+  const cells = maskCells();
+
+  expect(cells).toHaveLength(PIXEL_COUNT);
+  cells.forEach((cell, index) => {
+    expect(pixelIndexAt(cell.x, cell.y)).toBe(index);
+  });
+
+  // The four corners of the 31x31 square lie outside the chip, so the grid
+  // drawn from these cells leaves them blank.
+  const occupied = new Set(cells.map(({ x, y }) => `${x}:${y}`));
+  expect(occupied.has("0:0")).toBe(false);
+  expect(occupied.has("30:0")).toBe(false);
+  expect(occupied.has("0:30")).toBe(false);
+  expect(occupied.has("30:30")).toBe(false);
+  expect(occupied.has("15:0")).toBe(true);
+  expect(occupied.has("0:15")).toBe(true);
+});
+
+test("the mask's edges are listed once each", () => {
+  const edges = maskEdges();
+
+  // A translucent line stroked twice reads as a brighter line, so every shared
+  // edge between two cells must appear exactly once.
+  const keys = edges.map(({ orientation, x, y }) => `${orientation}:${x}:${y}`);
+  expect(new Set(keys).size).toBe(keys.length);
+
+  // Every edge borders the chip on at least one side, and every cell is fully
+  // enclosed by four of them.
+  for (const { orientation, x, y } of edges) {
+    const before =
+      orientation === "vertical" ? pixelIndexAt(x - 1, y) : pixelIndexAt(x, y - 1);
+    expect(before !== null || pixelIndexAt(x, y) !== null).toBe(true);
+  }
+  const drawn = new Set(keys);
+  for (const { x, y } of maskCells()) {
+    expect(drawn.has(`vertical:${x}:${y}`)).toBe(true);
+    expect(drawn.has(`vertical:${x + 1}:${y}`)).toBe(true);
+    expect(drawn.has(`horizontal:${x}:${y}`)).toBe(true);
+    expect(drawn.has(`horizontal:${x}:${y + 1}`)).toBe(true);
+  }
+
+  // Nothing is drawn out in the corners of the square.
+  expect(drawn.has("vertical:0:0")).toBe(false);
+  expect(drawn.has("horizontal:0:0")).toBe(false);
+  expect(drawn.has("vertical:31:30")).toBe(false);
 });
 
 test("pixels round-trip through lowercase hex", () => {
