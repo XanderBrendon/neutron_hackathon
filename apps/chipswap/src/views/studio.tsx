@@ -38,6 +38,7 @@ import {
   paint,
   paintLocks,
   patternFits,
+  patternShowing,
   previewPattern,
   redo,
   removePaletteColor,
@@ -67,6 +68,19 @@ const swatchStyle = (colour: string) => ({
   background: colour,
   color: contrastColor(colour),
 });
+
+/**
+ * A stamp that has been committed, with everything needed to put the picture
+ * back the way it was: the placement it was stamped at, and the art it left
+ * behind, which is how an undo is recognised as undoing this stamp.
+ */
+type StampBack = {
+  image: LoadedImage;
+  zoom: number;
+  offset: { x: number; y: number };
+  colours: number;
+  art: Pattern;
+};
 
 type Props = {
   status: Status | null;
@@ -105,6 +119,10 @@ export const Studio = ({ status, onChanged }: Props) => {
   const [offset, setOffset] = useState({ x: 0, y: 0 });
   const [stampColors, setStampColors] = useState(12);
   const [showImage, setShowImage] = useState(true);
+  // The last stamp, kept so undo can hand the picture back rather than only
+  // taking the paint away: a stamp that missed is worth another go from where
+  // it was, not from the beginning.
+  const [stampBack, setStampBack] = useState<StampBack | null>(null);
   const [publishMode, setPublishMode] = useState<TradeMode>("auto");
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -168,6 +186,7 @@ export const Studio = ({ status, onChanged }: Props) => {
     );
     setPreview(null);
     clearImage();
+    setStampBack(null);
     setPicker(false);
     setConfirmPublish(false);
     setPublishMode(selected.tradeMode);
@@ -355,6 +374,7 @@ export const Studio = ({ status, onChanged }: Props) => {
     try {
       const loaded = await loadImage(blob);
       setPreview(null);
+      setStampBack(null);
       setImage(loaded);
       setZoom(1);
       setOffset({ x: 0, y: 0 });
@@ -587,8 +607,23 @@ export const Studio = ({ status, onChanged }: Props) => {
   };
 
   const handleStamp = () => {
-    if (!editor || !stamped) return;
-    setEditor(applyPattern(editor, stamped));
+    if (!editor || !image || !stamped) return;
+    const next = applyPattern(editor, stamped);
+    setEditor(next);
+    // Remembered only when the stamp is a step in the history. A stamp that
+    // changed nothing leaves no step to undo, so there is nothing to come back
+    // from and a memory of it could only be triggered by somebody else's undo.
+    setStampBack(
+      next === editor
+        ? null
+        : {
+            image,
+            zoom,
+            offset,
+            colours: stampColors,
+            art: { pixels: next.pixels, palette: next.palette },
+          },
+    );
     const added = stamped.added;
     clearImage();
     setMessage(
@@ -596,6 +631,31 @@ export const Studio = ({ status, onChanged }: Props) => {
         ? "Image stamped. Locked pixels were left alone."
         : `Image stamped, ${added} ${added === 1 ? "colour" : "colours"} added. Locked pixels were left alone.`,
     );
+  };
+
+  // Undo takes the paint off; if the step it took off was a stamp, it also puts
+  // the picture back where it was, so a stamp that came out wrong can be nudged
+  // and tried again rather than set up from scratch.
+  const handleUndo = () => {
+    if (!editor) return;
+    setEditor(undo(editor));
+    if (!stampBack || !patternShowing(editor, stampBack.art)) return;
+    setImage(stampBack.image);
+    setZoom(stampBack.zoom);
+    setOffset(stampBack.offset);
+    setStampColors(stampBack.colours);
+    setShowImage(true);
+    setPreview(null);
+    setMessage("Stamp undone. The picture is back where it was.");
+  };
+
+  // The other half of that: redoing the stamp commits the picture again, so it
+  // comes off the table the way stamping took it off in the first place.
+  const handleRedo = () => {
+    if (!editor) return;
+    const next = redo(editor);
+    setEditor(next);
+    if (stampBack && patternShowing(next, stampBack.art)) clearImage();
   };
 
   // What the chip shows: a stamp being placed outranks a generator preview,
@@ -771,7 +831,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                 <button
                   className="nt-button nt-button--ghost nt-button--sm"
                   disabled={!editor.canUndo}
-                  onClick={() => setEditor(undo(editor))}
+                  onClick={handleUndo}
                   type="button"
                 >
                   Undo
@@ -779,7 +839,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                 <button
                   className="nt-button nt-button--ghost nt-button--sm"
                   disabled={!editor.canRedo}
-                  onClick={() => setEditor(redo(editor))}
+                  onClick={handleRedo}
                   type="button"
                 >
                   Redo
@@ -1322,8 +1382,9 @@ export const Studio = ({ status, onChanged }: Props) => {
                 <p className="nt-help">
                   Drag the picture across the chip to place it. Every chip pixel
                   takes the average colour of the picture underneath it, and
-                  locked pixels keep what they have. Source: {image.width} ×{" "}
-                  {image.height} px.
+                  locked pixels keep what they have. Undo hands the picture back
+                  where it was, so a stamp can be nudged and tried again. Source:{" "}
+                  {image.width} × {image.height} px.
                 </p>
               </>
             ) : (

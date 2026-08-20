@@ -213,6 +213,21 @@ export function patternFits(state: EditorState, pattern: Pattern): boolean {
 }
 
 /**
+ * Whether the chip is showing exactly this pattern, colours and all. It is how
+ * a step in the history is recognised after the fact: undoing off a state that
+ * matches what a stamp produced is undoing that stamp, however many steps later
+ * it happens.
+ */
+export function patternShowing(state: EditorState, pattern: Pattern): boolean {
+  return (
+    state.pixels.length === pattern.pixels.length &&
+    state.palette.length === pattern.palette.length &&
+    state.palette.every((colour, index) => pattern.palette[index] === colour) &&
+    state.pixels.every((value, index) => pattern.pixels[index] === value)
+  );
+}
+
+/**
  * The chip as the pattern would leave it, so a preview shows what applying it
  * really does: locked pixels keep the colour they have.
  */

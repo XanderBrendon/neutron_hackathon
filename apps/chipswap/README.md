@@ -26,7 +26,9 @@ clipboard is placed under the chip, dragged and scaled against a live preview,
 and then sampled: each chip pixel takes the average colour of the picture
 underneath it, and the picture's colours are reduced by median cut to a budget
 that fits the palette. Locked pixels are left out of it — they keep their
-colour, and their samples take no part in the reduction.
+colour, and their samples take no part in the reduction. Undo takes the stamp
+off and hands the picture back at the placement it was stamped from, so a stamp
+that came out wrong is nudged and tried again rather than set up afresh.
 
 **Nothing is guessed.** An offer in flight is escrowed rather than deleted. If a
 peer never answers, the trade becomes `uncertain` and the chip stays committed

@@ -9,6 +9,7 @@ import {
   lockAllOfColor,
   paint,
   paintLocks,
+  patternShowing,
   previewPattern,
   redo,
   removePaletteColor,
@@ -242,4 +243,29 @@ test("a pattern that changes nothing does not grow the history", () => {
   const state = fresh();
   const pixels = new Uint8Array(PIXEL_COUNT);
   expect(applyPattern(state, { pixels, palette: PALETTE }).canUndo).toBe(false);
+});
+
+test("a chip recognises the art a pattern left on it", () => {
+  let state = paint(fresh(), [A], 1);
+  state = paintLocks(state, [A], true);
+  const pattern = {
+    pixels: new Uint8Array(PIXEL_COUNT).fill(3),
+    palette: [...PALETTE, "#112233"],
+  };
+  const stamped = applyPattern(state, pattern);
+
+  // The art on the chip, not the pattern as offered: the locked pixel kept its
+  // own colour, so the pattern itself no longer describes what is there.
+  const art = { pixels: stamped.pixels, palette: stamped.palette };
+  expect(patternShowing(stamped, art)).toBe(true);
+  expect(patternShowing(stamped, pattern)).toBe(false);
+
+  // Stepping off that art is how an undo is known to have undone this stamp,
+  // and stepping back on to it is how a redo is known to have redone it.
+  expect(patternShowing(undo(stamped), art)).toBe(false);
+  expect(patternShowing(redo(undo(stamped)), art)).toBe(true);
+
+  // A palette that has moved on is a different chip, whatever the pixels say.
+  expect(patternShowing(addPaletteColor(stamped, "#654321"), art)).toBe(false);
+  expect(patternShowing(paint(stamped, [B], 0), art)).toBe(false);
 });
