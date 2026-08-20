@@ -26,7 +26,7 @@ import {
 } from "../brushes.ts";
 import { BrushGlyph } from "../brush_glyph.tsx";
 import { ChipCanvas } from "../chip_canvas.tsx";
-import { decodePixels, encodePixels } from "../chip.ts";
+import { decodePixels, encodePixels, pixelIndexAt } from "../chip.ts";
 import {
   addPaletteColor,
   applyGenerator,
@@ -44,10 +44,18 @@ import {
   unlockAll,
   type EditorState,
 } from "../editor_state.ts";
+import { floodRegion } from "../flood.ts";
 import { GENERATORS, renderGenerator, type GeneratorId } from "../patterns.ts";
 import { MAX_PALETTE, blendColors, contrastColor } from "../palette.ts";
 
-type Tool = "paint" | "lock" | "unlock";
+type Tool = "paint" | "fill" | "lock" | "unlock";
+
+const TOOLS: Record<Tool, string> = {
+  paint: "Paint",
+  fill: "Fill",
+  lock: "Lock",
+  unlock: "Unlock",
+};
 
 /** Paints a control in the colour it stands for, with a legible label on top. */
 const swatchStyle = (colour: string) => ({
@@ -179,6 +187,24 @@ export const Studio = ({ status, onChanged }: Props) => {
       setEditor((current) => (current ? endStroke(current) : current));
       return;
     }
+    if (tool === "fill") {
+      // One click, one fill: a drag over the region it just painted must not
+      // stack an undo entry for every pixel the pointer crosses.
+      if (phase !== "start") return;
+      const start = pixelIndexAt(x, y);
+      if (start === null) return;
+      setPreview(null);
+      setEditor((current) =>
+        current
+          ? paint(
+              current,
+              floodRegion(current.pixels, current.locks, start),
+              current.activeColor,
+            )
+          : current,
+      );
+      return;
+    }
     const indices = stamp(brush, x, y);
     if (indices.length === 0) return;
     setPreview(null);
@@ -199,13 +225,23 @@ export const Studio = ({ status, onChanged }: Props) => {
   const hoverPreview = useCallback(
     (x: number, y: number) => {
       if (!editor) return null;
+      const ink = editor.palette[editor.activeColor] ?? "#f2f5f7";
+      if (tool === "fill") {
+        // The outline lands on the edge of the region itself, so a fill shows
+        // how far it would run before it runs.
+        const start = pixelIndexAt(x, y);
+        const region =
+          start === null ? [] : floodRegion(editor.pixels, editor.locks, start);
+        if (region.length === 0) return null;
+        return { cells: region, changes: region, colour: ink };
+      }
       const cells = stamp(brush, x, y);
       if (cells.length === 0) return null;
       if (tool === "paint") {
         return {
           cells,
           changes: cells.filter((index) => editor.locks[index] !== 1),
-          colour: editor.palette[editor.activeColor] ?? "#f2f5f7",
+          colour: ink,
         };
       }
       // Locking only changes an unlocked pixel, unlocking only a locked one.
@@ -850,9 +886,9 @@ export const Studio = ({ status, onChanged }: Props) => {
           </section>
 
           <section className="nt-section">
-            <h3 className="nt-section-title">Locks</h3>
+            <h3 className="nt-section-title">Tool</h3>
             <div className="nt-segmented">
-              {(["paint", "lock", "unlock"] as const).map((mode) => (
+              {(Object.keys(TOOLS) as Tool[]).map((mode) => (
                 <button
                   aria-pressed={tool === mode}
                   className={cx("nt-button nt-button--sm", {
@@ -862,10 +898,21 @@ export const Studio = ({ status, onChanged }: Props) => {
                   onClick={() => setTool(mode)}
                   type="button"
                 >
-                  {mode === "paint" ? "Paint" : mode === "lock" ? "Lock" : "Unlock"}
+                  {TOOLS[mode]}
                 </button>
               ))}
             </div>
+            {tool === "fill" ? (
+              <p className="nt-help">
+                Fill spreads from the pixel you click across every pixel of the
+                same colour touching it, whatever the brush. Locked pixels stop
+                it.
+              </p>
+            ) : null}
+          </section>
+
+          <section className="nt-section">
+            <h3 className="nt-section-title">Locks</h3>
             <div className="nt-cluster">
               <button
                 className="nt-button nt-button--sm"

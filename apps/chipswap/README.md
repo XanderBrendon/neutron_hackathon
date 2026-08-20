@@ -106,6 +106,7 @@ src/
   palette.ts        colours and blending
   brushes.ts        preset and custom brushes
   patterns.ts       ring, spoke, and grid generators
+  flood.ts          the region a fill covers
   editor_state.ts   pure editor reducers with undo and locks
   api.ts            typed self calls and payload parsers
   views/            studio, collection, store, trades, directory
