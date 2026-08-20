@@ -24,6 +24,7 @@ import {
   stamp,
   type Brush,
 } from "../brushes.ts";
+import { BrushGlyph } from "../brush_glyph.tsx";
 import { ChipCanvas } from "../chip_canvas.tsx";
 import { decodePixels, encodePixels } from "../chip.ts";
 import {
@@ -190,6 +191,33 @@ export const Studio = ({ status, onChanged }: Props) => {
       return paintLocks(current, indices, tool === "lock", stroke);
     });
   };
+
+  // The same stamp the click would use, split in two: everything the brush
+  // covers is outlined so its position is visible, and the pixels that would
+  // really change are tinted. A locked pixel stays inside the outline and takes
+  // no tint, so the lock shows itself before the click rather than after it.
+  const hoverPreview = useCallback(
+    (x: number, y: number) => {
+      if (!editor) return null;
+      const cells = stamp(brush, x, y);
+      if (cells.length === 0) return null;
+      if (tool === "paint") {
+        return {
+          cells,
+          changes: cells.filter((index) => editor.locks[index] !== 1),
+          colour: editor.palette[editor.activeColor] ?? "#f2f5f7",
+        };
+      }
+      // Locking only changes an unlocked pixel, unlocking only a locked one.
+      const changeable = tool === "lock" ? 0 : 1;
+      return {
+        cells,
+        changes: cells.filter((index) => editor.locks[index] === changeable),
+        colour: "#f2f5f7",
+      };
+    },
+    [brush, editor, tool],
+  );
 
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
@@ -450,6 +478,7 @@ export const Studio = ({ status, onChanged }: Props) => {
 
             <ChipCanvas
               className="chipswap-editor-canvas"
+              hoverPreview={editable ? hoverPreview : undefined}
               label={`${selected.title} artwork`}
               locks={editor.locks}
               onPaint={editable ? handlePaint : undefined}
@@ -728,14 +757,16 @@ export const Studio = ({ status, onChanged }: Props) => {
               {brushes.map((candidate) => (
                 <span className="chipswap-brush-row" key={candidate.id}>
                   <button
+                    aria-label={`Brush ${candidate.name}`}
                     aria-pressed={candidate.id === brushId}
-                    className={cx("nt-button nt-button--sm", {
+                    className={cx("nt-button nt-button--sm chipswap-brush-button", {
                       "nt-button--secondary": candidate.id !== brushId,
                     })}
                     onClick={() => setBrushId(candidate.id)}
+                    title={candidate.name}
                     type="button"
                   >
-                    {candidate.name}
+                    <BrushGlyph brush={candidate} />
                   </button>
                   {candidate.id.startsWith("custom-") ? (
                     <button

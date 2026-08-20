@@ -126,6 +126,31 @@ export function centerEdges(): MaskEdge[] {
   return edges;
 }
 
+/**
+ * The boundary of an arbitrary set of cells: every edge with a cell on exactly
+ * one side of it. A brush stamp traced this way comes out as one line around
+ * the whole footprint rather than a box drawn around each cell.
+ */
+export function outlineEdges(cells: { x: number; y: number }[]): MaskEdge[] {
+  const inside = new Map(cells.map((cell) => [`${cell.x}:${cell.y}`, cell]));
+  const edges: MaskEdge[] = [];
+  for (const { x, y } of inside.values()) {
+    if (!inside.has(`${x - 1}:${y}`)) {
+      edges.push({ orientation: "vertical", x, y });
+    }
+    if (!inside.has(`${x + 1}:${y}`)) {
+      edges.push({ orientation: "vertical", x: x + 1, y });
+    }
+    if (!inside.has(`${x}:${y - 1}`)) {
+      edges.push({ orientation: "horizontal", x, y });
+    }
+    if (!inside.has(`${x}:${y + 1}`)) {
+      edges.push({ orientation: "horizontal", x, y: y + 1 });
+    }
+  }
+  return edges;
+}
+
 /** Inverse of pixelIndexAt. */
 export function pixelPosition(index: number): { x: number; y: number } {
   if (!Number.isInteger(index) || index < 0 || index >= PIXEL_COUNT) {

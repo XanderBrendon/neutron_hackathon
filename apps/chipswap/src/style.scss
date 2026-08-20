@@ -269,6 +269,21 @@
     gap: 2px;
   }
 
+  /* The glyph says which brush this is, so the button is sized for the mark
+     rather than for a label. */
+  .chipswap-brush-button {
+    block-size: var(--nt-control-sm);
+    inline-size: var(--nt-control-sm);
+    padding: 0;
+  }
+
+  .chipswap-brush-glyph {
+    block-size: 20px;
+    display: block;
+    fill: currentColor;
+    inline-size: 20px;
+  }
+
   .chipswap-brush-editor {
     display: grid;
     gap: var(--nt-gap-2);

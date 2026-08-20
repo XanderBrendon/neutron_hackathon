@@ -13,7 +13,7 @@ const CENTRE_Y = 15;
 
 test("the preset library covers the shapes the editor offers", () => {
   const ids = PRESET_BRUSHES.map((brush) => brush.id);
-  expect(ids).toEqual(["dot", "square2", "square3", "cross", "ex", "ell"]);
+  expect(ids).toEqual(["dot", "square2", "square3", "cross", "ex"]);
   for (const brush of PRESET_BRUSHES) {
     expect(brush.cells.length).toBe(brush.width * brush.height);
     expect(brush.anchorX).toBeLessThan(brush.width);
@@ -52,17 +52,17 @@ test("the anchor lands on the pointer pixel", () => {
 });
 
 test("custom brushes round-trip through the backend record form", () => {
-  const brush = presetBrush("ell");
-  const record = brushToRecord(brush, "Corner");
+  const brush = presetBrush("cross");
+  const record = brushToRecord(brush, "Plus");
 
-  expect(record.name).toBe("Corner");
+  expect(record.name).toBe("Plus");
   expect(record.width).toBe(brush.width);
-  expect(record.cells).toBe("010000010000010101");
+  expect(record.cells).toBe("000100010101000100");
   expect(record.cells.length).toBe(brush.cells.length * 2);
 
   const restored = brushFromRecord({ ...record, id: 7 });
   expect(restored.id).toBe("custom-7");
-  expect(restored.name).toBe("Corner");
+  expect(restored.name).toBe("Plus");
   expect([...restored.cells]).toEqual([...brush.cells]);
   expect(stamp(restored, CENTRE_X, CENTRE_Y)).toEqual(stamp(brush, CENTRE_X, CENTRE_Y));
 });

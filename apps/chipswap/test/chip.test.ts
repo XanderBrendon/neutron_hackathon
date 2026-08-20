@@ -12,6 +12,7 @@ import {
   maskCells,
   maskEdges,
   maskRowWidths,
+  outlineEdges,
   pixelIndexAt,
   pixelPosition,
   rowOffsets,
@@ -140,6 +141,37 @@ test("the centre accent frames the middle row and column", () => {
     maskEdges().map(({ orientation, x, y }) => `${orientation}:${x}:${y}`),
   );
   for (const key of keys) expect(grid.has(key)).toBe(true);
+});
+
+test("an outline traces a cell set's boundary and nothing inside it", () => {
+  expect(outlineEdges([{ x: 4, y: 4 }])).toEqual([
+    { orientation: "vertical", x: 4, y: 4 },
+    { orientation: "vertical", x: 5, y: 4 },
+    { orientation: "horizontal", x: 4, y: 4 },
+    { orientation: "horizontal", x: 4, y: 5 },
+  ]);
+
+  const block: { x: number; y: number }[] = [];
+  for (let y = 2; y < 5; y += 1) {
+    for (let x = 2; x < 5; x += 1) block.push({ x, y });
+  }
+  const keys = outlineEdges(block).map(
+    ({ orientation, x, y }) => `${orientation}:${x}:${y}`,
+  );
+
+  // Three edges along each of the four sides, and nothing between neighbours:
+  // a brush stamp reads as one shape rather than as a box per cell.
+  expect(new Set(keys).size).toBe(keys.length);
+  expect(keys).toHaveLength(12);
+  expect(keys).toContain("vertical:2:3");
+  expect(keys).toContain("vertical:5:3");
+  expect(keys).not.toContain("vertical:3:3");
+  expect(keys).not.toContain("horizontal:3:3");
+
+  // Stamps hand over their cells as indices, so a repeat is possible and must
+  // not stroke the same edge twice.
+  expect(outlineEdges([{ x: 1, y: 1 }, { x: 1, y: 1 }])).toHaveLength(4);
+  expect(outlineEdges([])).toEqual([]);
 });
 
 test("pixels round-trip through lowercase hex", () => {

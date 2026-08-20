@@ -52,7 +52,6 @@ export const PRESET_BRUSHES: readonly Brush[] = [
   brush("square3", "3 × 3", 3, 3, 1, 1, [1, 1, 1, 1, 1, 1, 1, 1, 1]),
   brush("cross", "Cross", 3, 3, 1, 1, [0, 1, 0, 1, 1, 1, 0, 1, 0]),
   brush("ex", "X", 3, 3, 1, 1, [1, 0, 1, 0, 1, 0, 1, 0, 1]),
-  brush("ell", "L", 3, 3, 0, 0, [1, 0, 0, 1, 0, 0, 1, 1, 1]),
 ];
 
 export function presetBrush(id: string): Brush {

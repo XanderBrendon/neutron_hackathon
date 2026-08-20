@@ -1,18 +1,21 @@
 // The chip renderer. The base canvas is a real 31x31 image scaled by CSS with
 // pixelated smoothing, so a chip is always drawn at exact pixel boundaries. A
-// second canvas on top carries the lock hatch and the pixel grid, which need
-// sub-cell drawing and must not disturb the artwork underneath. Both follow the
-// circular mask, so the corners of the square are blank rather than looking
-// like cells nobody is allowed to paint. The optional centreline accent is the
-// same geometry drawn heavier over the middle row and column.
+// second canvas on top carries the lock hatch, the pixel grid and the brush
+// hint, which need sub-cell drawing and must not disturb the artwork
+// underneath. Both follow the circular mask, so the corners of the square are
+// blank rather than looking like cells nobody is allowed to paint. The optional
+// centreline accent is the same geometry drawn heavier over the middle row and
+// column.
 
-import { useCallback, useEffect, useRef } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   DIAMETER,
   centerEdges,
   maskCells,
   maskEdges,
+  outlineEdges,
   pixelIndexAt,
+  pixelPosition,
   type MaskEdge,
 } from "./chip.ts";
 import { parseHexColor } from "./palette.ts";
@@ -41,6 +44,15 @@ const strokeEdges = (
   context.stroke();
 };
 
+/** What the pointer is about to do, asked for one hovered cell at a time. */
+export type HoverPreview = {
+  /** Every chip pixel the brush covers, outlined to show where it sits. */
+  cells: number[];
+  /** The subset a click would actually change, tinted with `colour`. */
+  changes: number[];
+  colour: string;
+};
+
 export type ChipCanvasProps = {
   pixels: Uint8Array;
   palette: string[];
@@ -51,6 +63,7 @@ export type ChipCanvasProps = {
   className?: string | undefined;
   label: string;
   onPaint?: ((x: number, y: number, phase: PaintPhase) => void) | undefined;
+  hoverPreview?: ((x: number, y: number) => HoverPreview | null) | undefined;
 };
 
 export const ChipCanvas = ({
@@ -63,11 +76,13 @@ export const ChipCanvas = ({
   className,
   label,
   onPaint,
+  hoverPreview,
 }: ChipCanvasProps) => {
   const baseRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const painting = useRef(false);
   const lastCell = useRef<string | null>(null);
+  const [hover, setHover] = useState<{ x: number; y: number } | null>(null);
 
   useEffect(() => {
     const canvas = baseRef.current;
@@ -131,6 +146,30 @@ export const ChipCanvas = ({
       strokeEdges(context, CENTER_EDGES, thick);
     }
 
+    // Under the lock hatch on purpose: a hatched cell inside the brush has to
+    // go on reading as locked while the hint sits over it.
+    const preview = hover && hoverPreview ? hoverPreview(hover.x, hover.y) : null;
+    if (preview) {
+      context.globalAlpha = 0.6;
+      context.fillStyle = preview.colour;
+      for (const index of preview.changes) {
+        const { x, y } = pixelPosition(index);
+        context.fillRect(x * scale, y * scale, scale, scale);
+      }
+      context.globalAlpha = 1;
+
+      // The whole footprint is outlined, not just the cells that would change,
+      // so the brush stays findable where a click would do nothing. The dark
+      // pass underneath keeps the line legible over pale artwork.
+      const outline = outlineEdges(preview.cells.map((index) => pixelPosition(index)));
+      context.strokeStyle = "rgba(14, 20, 26, 0.85)";
+      context.lineWidth = 3;
+      strokeEdges(context, outline, thin);
+      context.strokeStyle = "rgba(242, 245, 247, 0.95)";
+      context.lineWidth = 1;
+      strokeEdges(context, outline, thin);
+    }
+
     if (!locks) return;
     context.strokeStyle = "rgba(242, 245, 247, 0.75)";
     context.lineWidth = Math.max(1, scale / 8);
@@ -143,7 +182,7 @@ export const ChipCanvas = ({
       context.lineTo(left + scale - 1, top + 1);
     }
     context.stroke();
-  }, [locks, scale, showCenterlines, showGrid]);
+  }, [hover, hoverPreview, locks, scale, showCenterlines, showGrid]);
 
   const cellFromEvent = useCallback(
     (event: React.PointerEvent<HTMLCanvasElement>) => {
@@ -158,9 +197,18 @@ export const ChipCanvas = ({
     [],
   );
 
+  // Only the cell matters, so a drag across one of them re-renders once.
+  const trackHover = (cell: { x: number; y: number } | null) => {
+    if (!hoverPreview) return;
+    setHover((current) =>
+      current?.x === cell?.x && current?.y === cell?.y ? current : cell,
+    );
+  };
+
   const handleDown = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (!onPaint) return;
     const cell = cellFromEvent(event);
+    trackHover(cell);
     if (!cell) return;
     painting.current = true;
     lastCell.current = `${cell.x}:${cell.y}`;
@@ -169,8 +217,9 @@ export const ChipCanvas = ({
   };
 
   const handleMove = (event: React.PointerEvent<HTMLCanvasElement>) => {
-    if (!onPaint || !painting.current) return;
     const cell = cellFromEvent(event);
+    trackHover(cell);
+    if (!onPaint || !painting.current) return;
     if (!cell) return;
     const key = `${cell.x}:${cell.y}`;
     // A drag across one cell fires once, so a stroke is one history entry per
@@ -179,6 +228,9 @@ export const ChipCanvas = ({
     lastCell.current = key;
     onPaint(cell.x, cell.y, "move");
   };
+
+  // A touch pointer stops existing on lift, so the hint goes with it.
+  const handleLeave = () => trackHover(null);
 
   const handleUp = (event: React.PointerEvent<HTMLCanvasElement>) => {
     if (!onPaint || !painting.current) return;
@@ -208,6 +260,7 @@ export const ChipCanvas = ({
         height={size}
         onPointerCancel={handleUp}
         onPointerDown={handleDown}
+        onPointerLeave={handleLeave}
         onPointerMove={handleMove}
         onPointerUp={handleUp}
         ref={overlayRef}
