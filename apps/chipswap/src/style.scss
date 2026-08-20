@@ -276,11 +276,13 @@
   }
 
   /* The glyph says which brush this is, so the button is sized for the mark
-     rather than for a label, and sized generously: a one-pixel brush has only
-     a speck to show for itself. */
+     rather than for a label, and carries almost no padding around it: the mark
+     stays generous — a one-pixel brush has only a speck to show for itself —
+     while the five presets still come to less than one row of the tools
+     column, where a wrapped fifth brush would read as a second group. */
   .chipswap-brush-button {
-    block-size: 56px;
-    inline-size: 56px;
+    block-size: 48px;
+    inline-size: 48px;
     padding: 0;
   }
 
