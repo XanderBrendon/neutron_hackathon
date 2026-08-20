@@ -54,6 +54,9 @@ old.settings := { auto_announce = true };
 Map.add(old.designs, Nat.compare, 1, design(1, #auto, #published));
 Map.add(old.designs, Nat.compare, 2, design(2, #manual, #published));
 Map.add(old.designs, Nat.compare, 3, design(3, #manual, #draft));
+// The ordinary case on an upgrade: a draft created and never re-policied, which
+// in V1 meant the mode `create` gave it.
+Map.add(old.designs, Nat.compare, 4, design(4, #auto, #draft));
 Map.add(old.holdings, Text.compare, "held", chip);
 Map.add(
     old.holdings,
@@ -165,7 +168,7 @@ assert (fresh.next_brush_id == 3);
 assert (fresh.settings.auto_announce);
 
 // Every root keeps its population.
-assert (Map.size(fresh.designs) == 3);
+assert (Map.size(fresh.designs) == 4);
 assert (Map.size(fresh.holdings) == 2);
 assert (Map.size(fresh.directory) == 1);
 assert (Map.size(fresh.catalog_cache) == 1);
@@ -194,10 +197,39 @@ assert (manual.requirements.min_colors == null);
 assert (manual.requirements.max_coverage == null);
 assert (manual.requirements.nsfw == null);
 
-// A draft migrates as a draft, with its slot and its unset publication time.
+// A draft migrates as a draft, whole. This is the case that matters most on an
+// upgrade: unpublished work exists nowhere but here, so its title, its artwork,
+// its slot and its revision all have to arrive unchanged, and it must not come
+// out looking published.
 let ?draft = Map.get(fresh.designs, Nat.compare, 3) else Runtime.trap("missing design");
 assert (draft.state == #draft);
 assert (draft.published_at_ns == null);
+assert (draft.design_id == 3);
+assert (draft.title == "Design 3");
+assert (draft.revision == 4);
+assert (draft.next_serial == 6);
+assert (draft.created_at_ns == 103);
+assert (draft.art.shape_id == "circle31");
+assert (draft.art.palette == [0x000000, 0xffffff]);
+assert (draft.art.pixels == Blob.fromArray([0, 1, 0]));
+// The mode converts the same way whatever the state, so a draft that had been
+// set to "designer approves" keeps that as its one requirement.
+assert (draft.requirements.approval);
+assert (draft.requirements.min_colors == null);
+assert (draft.requirements.max_coverage == null);
+assert (draft.requirements.nsfw == null);
+
+// And a draft still carrying what `create` gave it arrives asking nothing at
+// all, which is what a draft created under V1 and never published looks like.
+let ?plainDraft = Map.get(fresh.designs, Nat.compare, 4) else Runtime.trap("missing design");
+assert (plainDraft.state == #draft);
+assert (plainDraft.title == "Design 4");
+assert (plainDraft.art.pixels == Blob.fromArray([0, 1, 0]));
+assert (not plainDraft.requirements.approval);
+assert (plainDraft.requirements.min_colors == null);
+assert (plainDraft.requirements.max_coverage == null);
+assert (plainDraft.requirements.nsfw == null);
+assert (not plainDraft.nsfw);
 
 // Nothing in V1 recorded a tag, so nothing arrives tagged.
 assert (not auto.nsfw and not manual.nsfw and not draft.nsfw);
