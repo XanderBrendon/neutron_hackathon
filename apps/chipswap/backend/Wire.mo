@@ -19,9 +19,16 @@ import Shape "./Shape";
 // big-endian; text, blobs, and arrays are length-prefixed and capped before any
 // allocation; and a decoder rejects trailing bytes so two different byte strings
 // can never mean the same message.
+//
+// Version 2 carries trade requirements and the NSFW tag. Version 1 knew only a
+// two-valued trade mode, so it is still readable: its mode is the one
+// requirement it stood for, and its chips are untagged. We only ever write
+// version 2 — a version 1 peer will refuse that outright, which is the point of
+// putting a version in every message.
 module {
     public let MAGIC : [Nat8] = [0x43, 0x53, 0x57, 0x31]; // CSW1
-    public let WIRE_VERSION : Nat8 = 1;
+    public let WIRE_VERSION : Nat8 = 2;
+    public let MIN_WIRE_VERSION : Nat8 = 1;
     public let MAX_MESSAGE_BYTES : Nat = 65_536;
 
     public let MAX_DESIGNS : Nat = 10;
@@ -31,13 +38,38 @@ module {
     public let MAX_CODE_BYTES : Nat = 64;
     public let MAX_PRINCIPAL_BYTES : Nat = 29;
 
+    // Requirement flags. Nothing else may be set: an unknown bit is a message
+    // from a future we cannot read, and it is refused rather than ignored.
+    let FLAG_APPROVAL : Nat = 1;
+    let FLAG_MIN_COLORS : Nat = 2;
+    let FLAG_MAX_COVERAGE : Nat = 4;
+    let FLAG_NSFW_RULE : Nat = 8;
+    let FLAG_NSFW_REQUIRED : Nat = 16;
+    let FLAG_KNOWN : Nat = 31;
+
+    // Bounds a requirement must satisfy to have travelled honestly. They match
+    // Requirements.mo; a value outside them never becomes a stored requirement.
+    let MIN_COLORS_FLOOR : Nat = 2;
+    let MAX_COVERAGE_FLOOR : Nat = 1;
+    let MAX_COVERAGE_CEILING : Nat = 99;
+
     let TYPE_CATALOG : Nat8 = 1;
     let TYPE_TRADE : Nat8 = 2;
     let TYPE_DELIVER : Nat8 = 3;
     let TYPE_STATUS : Nat8 = 4;
     let TYPE_ANNOUNCE : Nat8 = 5;
 
-    public type TradeMode = { #auto; #manual };
+    public type NsfwRule = { #disallowed; #required };
+
+    // Structurally the schema's requirement set. It is repeated here rather
+    // than imported so the wire stays a description of bytes: a memory version
+    // may change without silently changing what peers send each other.
+    public type Requirements = {
+        approval : Bool;
+        min_colors : ?Nat;
+        max_coverage : ?Nat;
+        nsfw : ?NsfwRule;
+    };
 
     public type Art = {
         shape_id : Text;
@@ -51,6 +83,7 @@ module {
         serial : Nat;
         title : Text;
         art : Art;
+        nsfw : Bool;
         design_revision : Nat;
         minted_at_ns : Int;
     };
@@ -59,7 +92,8 @@ module {
         design_id : Nat;
         title : Text;
         art : Art;
-        trade_mode : TradeMode;
+        requirements : Requirements;
+        nsfw : Bool;
         design_revision : Nat;
         published_at_ns : Int;
     };
@@ -332,12 +366,40 @@ module {
         appendBlob(bytes, art.pixels);
     };
 
+    func appendFlag(bytes : List.List<Nat8>, value : Bool) {
+        List.add(bytes, if (value) (1 : Nat8) else (0 : Nat8));
+    };
+
+    // One flags byte, then only the values the flags claim are there. A field
+    // that is off occupies nothing, so an unrestricted design costs one byte.
+    func appendRequirements(bytes : List.List<Nat8>, requirements : Requirements) {
+        var flags = 0;
+        if (requirements.approval) flags += FLAG_APPROVAL;
+        if (requirements.min_colors != null) flags += FLAG_MIN_COLORS;
+        if (requirements.max_coverage != null) flags += FLAG_MAX_COVERAGE;
+        switch (requirements.nsfw) {
+            case (?#disallowed) flags += FLAG_NSFW_RULE;
+            case (?#required) flags += FLAG_NSFW_RULE + FLAG_NSFW_REQUIRED;
+            case null {};
+        };
+        appendU8(bytes, flags);
+        switch (requirements.min_colors) {
+            case (?value) appendU8(bytes, value);
+            case null {};
+        };
+        switch (requirements.max_coverage) {
+            case (?value) appendU8(bytes, value);
+            case null {};
+        };
+    };
+
     func appendChip(bytes : List.List<Nat8>, chip : Chip) {
         appendPrincipal(bytes, chip.designer);
         appendU16(bytes, chip.design_id);
         appendU64(bytes, chip.serial);
         appendText(bytes, chip.title, MAX_TITLE_BYTES);
         appendArt(bytes, chip.art);
+        appendFlag(bytes, chip.nsfw);
         appendU64(bytes, chip.design_revision);
         appendTimestamp(bytes, chip.minted_at_ns);
     };
@@ -346,7 +408,8 @@ module {
         appendU16(bytes, design.design_id);
         appendText(bytes, design.title, MAX_TITLE_BYTES);
         appendArt(bytes, design.art);
-        List.add(bytes, switch (design.trade_mode) { case (#auto)(0 : Nat8); case (#manual)(1 : Nat8) });
+        appendRequirements(bytes, design.requirements);
+        appendFlag(bytes, design.nsfw);
         appendU64(bytes, design.design_revision);
         appendTimestamp(bytes, design.published_at_ns);
     };
@@ -356,9 +419,12 @@ module {
     // Every read is bounds-checked. A failed read latches `failed`, so a caller
     // may read a whole message and check validity once, and a length that was
     // never really read is zero rather than attacker-chosen.
-    class Reader(bytes : [Nat8]) {
+    class Reader(bytes : [Nat8], wire : Nat8) {
         var offset = 0;
         var failed = false;
+
+        /** The version in the header, so a record can be read as it was sent. */
+        public func version() : Nat8 = wire;
 
         public func ok() : Bool = not failed;
 
@@ -430,6 +496,19 @@ module {
             Blob.fromArray(raw(length));
         };
 
+        // Anything but 0 or 1 is a byte string we have no meaning for, and two
+        // spellings of true would be two encodings of one message.
+        public func flag() : Bool {
+            switch (u8()) {
+                case (0) false;
+                case (1) true;
+                case (_) {
+                    failed := true;
+                    false;
+                };
+            };
+        };
+
         public func principal() : Principal {
             let length = u8();
             if (length == 0 or length > MAX_PRINCIPAL_BYTES) {
@@ -450,8 +529,9 @@ module {
             index += 1;
         };
         if (bytes[MAGIC.size()] != expected) return null;
-        if (bytes[MAGIC.size() + 1] != WIRE_VERSION) return null;
-        let reader = Reader(bytes);
+        let version = bytes[MAGIC.size() + 1];
+        if (version < MIN_WIRE_VERSION or version > WIRE_VERSION) return null;
+        let reader = Reader(bytes, version);
         ignore reader.raw(MAGIC.size() + 2);
         ?reader;
     };
@@ -491,6 +571,8 @@ module {
         ?{ shape_id = shapeId; palette; pixels };
     };
 
+    // Version 1 had no tag, so a chip from a version 1 peer is untagged rather
+    // than assumed either way.
     func readChip(reader : Reader) : ?Chip {
         let designer = reader.principal();
         let designId = reader.u16();
@@ -498,6 +580,7 @@ module {
         let title = reader.text(MAX_TITLE_BYTES);
         if (not reader.ok()) return null;
         let ?art = readArt(reader) else return null;
+        let nsfw = if (reader.version() >= 2) reader.flag() else false;
         let designRevision = reader.u64();
         let mintedAt = reader.u64();
         if (not reader.ok()) return null;
@@ -507,30 +590,80 @@ module {
             serial;
             title;
             art;
+            nsfw;
             design_revision = designRevision;
             minted_at_ns = mintedAt;
         };
     };
 
+    // A requirement outside its bounds is refused rather than clamped: a peer
+    // that asks for a hundred and ninety colours is not describing a chip.
+    func readRequirements(reader : Reader) : ?Requirements {
+        let flags = reader.u8();
+        if (not reader.ok()) return null;
+        if (flags > FLAG_KNOWN) return null;
+        // The `#required` bit on its own would be a second spelling of "no
+        // rule", and one message must have exactly one encoding.
+        if (has(flags, FLAG_NSFW_REQUIRED) and not has(flags, FLAG_NSFW_RULE)) return null;
+        let minColors = if (has(flags, FLAG_MIN_COLORS)) {
+            let value = reader.u8();
+            if (value < MIN_COLORS_FLOOR or value > Shape.MAX_PALETTE) return null;
+            ?value;
+        } else null;
+        let maxCoverage = if (has(flags, FLAG_MAX_COVERAGE)) {
+            let value = reader.u8();
+            if (value < MAX_COVERAGE_FLOOR or value > MAX_COVERAGE_CEILING) return null;
+            ?value;
+        } else null;
+        if (not reader.ok()) return null;
+        let nsfw : ?NsfwRule = if (not has(flags, FLAG_NSFW_RULE)) null else if (
+            has(flags, FLAG_NSFW_REQUIRED)
+        ) ?#required else ?#disallowed;
+        ?{
+            approval = has(flags, FLAG_APPROVAL);
+            min_colors = minColors;
+            max_coverage = maxCoverage;
+            nsfw;
+        };
+    };
+
+    func has(flags : Nat, bit : Nat) : Bool = (flags / bit) % 2 == 1;
+
+    // Version 1 carried one mode byte where version 2 carries a requirement
+    // set. The mode is exactly the requirement it stood for.
     func readDesign(reader : Reader) : ?Design {
         let designId = reader.u16();
         let title = reader.text(MAX_TITLE_BYTES);
         if (not reader.ok()) return null;
         let ?art = readArt(reader) else return null;
-        let mode = reader.u8();
+        let (requirements, nsfw) = if (reader.version() >= 2) {
+            let ?parsed = readRequirements(reader) else return null;
+            (parsed, reader.flag());
+        } else {
+            let approval = switch (reader.u8()) {
+                case (0) false;
+                case (1) true;
+                case (_) return null;
+            };
+            (
+                {
+                    approval;
+                    min_colors = null;
+                    max_coverage = null;
+                    nsfw = null;
+                } : Requirements,
+                false,
+            );
+        };
         let designRevision = reader.u64();
         let publishedAt = reader.u64();
         if (not reader.ok()) return null;
-        let tradeMode : TradeMode = switch (mode) {
-            case (0) #auto;
-            case (1) #manual;
-            case (_) return null;
-        };
         ?{
             design_id = designId;
             title;
             art;
-            trade_mode = tradeMode;
+            requirements;
+            nsfw;
             design_revision = designRevision;
             published_at_ns = publishedAt;
         };

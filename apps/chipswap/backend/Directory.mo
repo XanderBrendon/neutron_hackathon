@@ -6,7 +6,8 @@ import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Text "mo:core/Text";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v1";
+import Memory "./memory/chipswap/v2";
+import Requirements "./Requirements";
 
 // The designer directory and the cached catalogs the store reads from.
 //
@@ -188,7 +189,8 @@ module {
     public type StoreFilter = {
         ownership : Text; // all | owned | not_owned
         designer_ownership : Text; // all | owner_of_designer | not_owner_of_designer
-        trade_mode : Text; // all | auto | manual
+        policy : Text; // all | open | approval | requirements
+        nsfw : Text; // hide | show
     };
 
     public type StoreRow = {
@@ -196,23 +198,28 @@ module {
         design_id : Nat;
         title : Text;
         art : Memory.Art;
-        trade_mode : Memory.TradeMode;
+        requirements : Memory.TradeRequirements;
+        nsfw : Bool;
         design_revision : Nat;
         owned : Bool;
         owns_designer : Bool;
         fetched_at_ns : Int;
     };
 
+    // `nsfw_hidden` counts what the tag filter removed, so a store that is
+    // quietly smaller than the directory can say so rather than just look empty.
     public type StorePage = {
         rows : [StoreRow];
         total : Nat;
+        nsfw_hidden : Nat;
     };
 
     public func validFilter(filter : StoreFilter) : Bool {
         let ownershipOk = filter.ownership == "all" or filter.ownership == "owned" or filter.ownership == "not_owned";
         let designerOk = filter.designer_ownership == "all" or filter.designer_ownership == "owner_of_designer" or filter.designer_ownership == "not_owner_of_designer";
-        let modeOk = filter.trade_mode == "all" or filter.trade_mode == "auto" or filter.trade_mode == "manual";
-        ownershipOk and designerOk and modeOk;
+        let policyOk = filter.policy == "all" or filter.policy == "open" or filter.policy == "approval" or filter.policy == "requirements";
+        let nsfwOk = filter.nsfw == "hide" or filter.nsfw == "show";
+        ownershipOk and designerOk and policyOk and nsfwOk;
     };
 
     // Filtering happens here rather than in the tile so that `total` and paging
@@ -228,6 +235,7 @@ module {
             func(left, right) { Principal.compare(left.0, right.0) },
         );
         let matched = List.empty<StoreRow>();
+        var hidden = 0;
         for ((designer, catalog) in catalogs.values()) {
             let ownsDesigner = Holdings.ownsAnyFrom(mem, designer);
             if (designerOwnershipMatches(filter, ownsDesigner)) {
@@ -235,34 +243,43 @@ module {
                     let owned = Holdings.ownsDesign(mem, designer, design.design_id);
                     if (
                         ownershipMatches(filter, owned) and
-                        tradeModeMatches(filter, design.trade_mode)
+                        policyMatches(filter, design.requirements)
                     ) {
-                        List.add(
-                            matched,
-                            {
-                                designer;
-                                design_id = design.design_id;
-                                title = design.title;
-                                art = design.art;
-                                trade_mode = design.trade_mode;
-                                design_revision = design.design_revision;
-                                owned;
-                                owns_designer = ownsDesigner;
-                                fetched_at_ns = catalog.fetched_at_ns;
-                            },
-                        );
+                        // Counted before it is dropped: the tag filter is the
+                        // one axis whose omissions the owner did not pick row by
+                        // row, so the tile is told how many it took away.
+                        if (design.nsfw and filter.nsfw == "hide") {
+                            hidden += 1;
+                        } else {
+                            List.add(
+                                matched,
+                                {
+                                    designer;
+                                    design_id = design.design_id;
+                                    title = design.title;
+                                    art = design.art;
+                                    requirements = design.requirements;
+                                    nsfw = design.nsfw;
+                                    design_revision = design.design_revision;
+                                    owned;
+                                    owns_designer = ownsDesigner;
+                                    fetched_at_ns = catalog.fetched_at_ns;
+                                },
+                            );
+                        };
                     };
                 };
             };
         };
         let all = List.toArray(matched);
         let total = all.size();
-        if (offset >= total or limit == 0) return { rows = []; total };
+        if (offset >= total or limit == 0) return { rows = []; total; nsfw_hidden = hidden };
         let available : Nat = total - offset;
         let take = if (limit < available) limit else available;
         {
             rows = Array.tabulate<StoreRow>(take, func(i) { all[offset + i] });
             total;
+            nsfw_hidden = hidden;
         };
     };
 
@@ -282,10 +299,13 @@ module {
         };
     };
 
-    func tradeModeMatches(filter : StoreFilter, mode : Memory.TradeMode) : Bool {
-        switch (filter.trade_mode) {
-            case ("auto") mode == #auto;
-            case ("manual") mode == #manual;
+    // "open" and "requirements" are not opposites: a design may ask for the
+    // designer's approval and nothing else, which is neither.
+    func policyMatches(filter : StoreFilter, requirements : Memory.TradeRequirements) : Bool {
+        switch (filter.policy) {
+            case ("open") Requirements.open(requirements);
+            case ("approval") requirements.approval;
+            case ("requirements") Requirements.restrictive(requirements);
             case (_) true;
         };
     };

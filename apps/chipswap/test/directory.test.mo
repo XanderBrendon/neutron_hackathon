@@ -6,7 +6,7 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v1";
+import Memory "../backend/memory/chipswap/v2";
 import Shape "../backend/Shape";
 
 func principalOf(seed : Nat) : Principal {
@@ -30,22 +30,33 @@ let art : Memory.Art = {
     pixels = Blob.fromArray(Array.tabulate<Nat8>(Shape.PIXEL_COUNT, func(_) { 0 }));
 };
 
-func cachedDesign(id : Nat, mode : Memory.TradeMode) : Memory.CachedDesign {
+func cachedDesign(
+    id : Nat,
+    requirements : Memory.TradeRequirements,
+    nsfw : Bool,
+) : Memory.CachedDesign {
     {
         design_id = id;
         title = "Design";
         art;
-        trade_mode = mode;
+        requirements;
+        nsfw;
         design_revision = 1;
         published_at_ns = 5;
     };
 };
+
+let OPEN = Memory.openRequirements();
+let APPROVES = { OPEN with approval = true };
+// Restrictive without asking for approval: the two axes are independent.
+let PICKY = { OPEN with min_colors = ?6 };
 
 func chip(designer : Principal, designId : Nat, serial : Nat) : Memory.Chip {
     {
         ref = { designer; design_id = designId; serial };
         title = "Chip";
         art;
+        nsfw = false;
         design_revision = 1;
         minted_at_ns = 1;
         acquired_at_ns = 1;
@@ -125,8 +136,8 @@ assert (Directory.get(evicting, bob) != null);
 let store = Memory.init();
 ignore Directory.note(store, alice, #manual, 1);
 ignore Directory.note(store, bob, #manual, 1);
-Directory.storeCatalog(store, alice, [cachedDesign(1, #auto), cachedDesign(2, #manual)], 50);
-Directory.storeCatalog(store, bob, [cachedDesign(1, #manual)], 60);
+Directory.storeCatalog(store, alice, [cachedDesign(1, OPEN, false), cachedDesign(2, APPROVES, false)], 50);
+Directory.storeCatalog(store, bob, [cachedDesign(1, APPROVES, false)], 60);
 let ?aliceEntry = Directory.get(store, alice) else Runtime.trap("entry missing");
 assert (aliceEntry.design_count == 2);
 assert (aliceEntry.last_catalog_ns == ?50);
@@ -135,11 +146,11 @@ var cacheSeed = 7000;
 while (Map.size(store.catalog_cache) < Directory.MAX_CATALOG_CACHE) {
     let extra = principalOf(cacheSeed);
     ignore Directory.note(store, extra, #exchange, 70);
-    Directory.storeCatalog(store, extra, [cachedDesign(1, #auto)], 70 + cacheSeed);
+    Directory.storeCatalog(store, extra, [cachedDesign(1, OPEN, false)], 70 + cacheSeed);
     cacheSeed += 1;
 };
 assert (Map.size(store.catalog_cache) == Directory.MAX_CATALOG_CACHE);
-Directory.storeCatalog(store, principalOf(cacheSeed), [cachedDesign(1, #auto)], 99_999);
+Directory.storeCatalog(store, principalOf(cacheSeed), [cachedDesign(1, OPEN, false)], 99_999);
 assert (Map.size(store.catalog_cache) == Directory.MAX_CATALOG_CACHE);
 // Alice's was the oldest fetch, so it is the one that left.
 assert (Map.get(store.catalog_cache, Principal.compare, alice) == null);
@@ -147,37 +158,67 @@ assert (Map.get(store.catalog_cache, Principal.compare, bob) != null);
 
 // Store rows apply the three filter axes independently and together.
 let rows = Memory.init();
-Directory.storeCatalog(rows, alice, [cachedDesign(1, #auto), cachedDesign(2, #manual)], 10);
-Directory.storeCatalog(rows, bob, [cachedDesign(1, #manual), cachedDesign(2, #auto)], 20);
+Directory.storeCatalog(
+    rows,
+    alice,
+    [cachedDesign(1, OPEN, false), cachedDesign(2, APPROVES, false)],
+    10,
+);
+Directory.storeCatalog(
+    rows,
+    bob,
+    [cachedDesign(1, PICKY, false), cachedDesign(2, OPEN, true)],
+    20,
+);
 switch (Holdings.admit(rows, chip(alice, 1, 1))) {
     case (#ok(())) {};
     case (#err(code)) Runtime.trap(code);
 };
 
-func runQuery(ownership : Text, designerOwnership : Text, mode : Text) : Directory.StorePage {
+func runQuery(
+    ownership : Text,
+    designerOwnership : Text,
+    policy : Text,
+    nsfw : Text,
+) : Directory.StorePage {
     Directory.storeRows(
         rows,
         {
             ownership;
             designer_ownership = designerOwnership;
-            trade_mode = mode;
+            policy;
+            nsfw;
         },
         0,
         50,
     );
 };
 
-assert (runQuery("all", "all", "all").total == 4);
-assert (runQuery("owned", "all", "all").total == 1);
-assert (runQuery("not_owned", "all", "all").total == 3);
-assert (runQuery("all", "owner_of_designer", "all").total == 2);
-assert (runQuery("all", "not_owner_of_designer", "all").total == 2);
-assert (runQuery("all", "all", "auto").total == 2);
-assert (runQuery("all", "all", "manual").total == 2);
-assert (runQuery("not_owned", "owner_of_designer", "manual").total == 1);
-assert (runQuery("owned", "not_owner_of_designer", "all").total == 0);
+// One of the four is tagged, so the default store is three rows and says so.
+assert (runQuery("all", "all", "all", "hide").total == 3);
+assert (runQuery("all", "all", "all", "hide").nsfw_hidden == 1);
+assert (runQuery("all", "all", "all", "show").total == 4);
+assert (runQuery("all", "all", "all", "show").nsfw_hidden == 0);
 
-let ownedRows = runQuery("owned", "all", "all");
+assert (runQuery("owned", "all", "all", "show").total == 1);
+assert (runQuery("not_owned", "all", "all", "show").total == 3);
+assert (runQuery("all", "owner_of_designer", "all", "show").total == 2);
+assert (runQuery("all", "not_owner_of_designer", "all", "show").total == 2);
+
+// The policy axis: two designs ask for nothing, one wants approval, one has a
+// requirement about the artwork. "Swaps freely" and "has requirements" are not
+// opposites, and a design that only wants approval is neither.
+assert (runQuery("all", "all", "open", "show").total == 2);
+assert (runQuery("all", "all", "approval", "show").total == 1);
+assert (runQuery("all", "all", "requirements", "show").total == 1);
+assert (runQuery("not_owned", "owner_of_designer", "approval", "show").total == 1);
+assert (runQuery("owned", "not_owner_of_designer", "all", "show").total == 0);
+
+// Hiding tagged chips narrows every other axis with it.
+assert (runQuery("all", "all", "open", "hide").total == 1);
+assert (runQuery("all", "all", "open", "hide").nsfw_hidden == 1);
+
+let ownedRows = runQuery("owned", "all", "all", "show");
 assert (ownedRows.rows[0].designer == alice);
 assert (ownedRows.rows[0].design_id == 1);
 assert (ownedRows.rows[0].owned);
@@ -187,15 +228,32 @@ assert (ownedRows.rows[0].fetched_at_ns == 10);
 // Paging reports the filtered total, not the cached total.
 let paged = Directory.storeRows(
     rows,
-    { ownership = "all"; designer_ownership = "all"; trade_mode = "auto" },
+    {
+        ownership = "all";
+        designer_ownership = "all";
+        policy = "open";
+        nsfw = "show";
+    },
     1,
     10,
 );
 assert (paged.total == 2);
 assert (paged.rows.size() == 1);
 
+// A row carries the whole policy, so the tile can pre-check an offer against it.
+let pickyRows = runQuery("all", "all", "requirements", "show");
+assert (pickyRows.rows[0].requirements.min_colors == ?6);
+assert (not pickyRows.rows[0].nsfw);
+let taggedRows = runQuery("all", "all", "open", "show");
+assert (taggedRows.rows[1].nsfw);
+
 // An unknown filter value is rejected rather than silently widened.
-assert (Directory.validFilter({ ownership = "all"; designer_ownership = "all"; trade_mode = "all" }));
-assert (Directory.validFilter({ ownership = "nope"; designer_ownership = "all"; trade_mode = "all" }) == false);
-assert (Directory.validFilter({ ownership = "all"; designer_ownership = "nope"; trade_mode = "all" }) == false);
-assert (Directory.validFilter({ ownership = "all"; designer_ownership = "all"; trade_mode = "nope" }) == false);
+func filterOf(ownership : Text, designer : Text, policy : Text, nsfw : Text) : Directory.StoreFilter {
+    { ownership; designer_ownership = designer; policy; nsfw };
+};
+assert (Directory.validFilter(filterOf("all", "all", "all", "hide")));
+assert (Directory.validFilter(filterOf("all", "all", "requirements", "show")));
+assert (Directory.validFilter(filterOf("nope", "all", "all", "hide")) == false);
+assert (Directory.validFilter(filterOf("all", "nope", "all", "hide")) == false);
+assert (Directory.validFilter(filterOf("all", "all", "nope", "hide")) == false);
+assert (Directory.validFilter(filterOf("all", "all", "all", "nope")) == false);

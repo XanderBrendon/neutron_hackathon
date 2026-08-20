@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { cx } from "neutron-design-system";
 import {
   errorMessage,
@@ -20,11 +20,20 @@ import { ChipCanvas } from "../chip_canvas.tsx";
 import { decodePixels } from "../chip.ts";
 import {
   DESIGNER_OPTIONS,
+  NSFW_OPTIONS,
   OWNERSHIP_OPTIONS,
-  TRADE_MODE_OPTIONS,
+  POLICY_OPTIONS,
   defaultFilter,
   filterLabel,
 } from "../store_filter.ts";
+import { PolicyBadges } from "../trade_policy.tsx";
+import {
+  check,
+  describe as describeRequirements,
+  failureMessage,
+  measure,
+  type FailureCode,
+} from "../requirements.ts";
 
 const PAGE_SIZE = 24;
 const BATCH = 8;
@@ -38,6 +47,7 @@ export const Store = ({ status, onChanged }: Props) => {
   const [filter, setFilter] = useState<StoreFilter>(defaultFilter());
   const [rows, setRows] = useState<StoreRow[]>([]);
   const [total, setTotal] = useState(0);
+  const [nsfwHidden, setNsfwHidden] = useState(0);
   const [offset, setOffset] = useState(0);
   const [failure, setFailure] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
@@ -52,6 +62,7 @@ export const Store = ({ status, onChanged }: Props) => {
         const page = await loadStore(nextFilter, nextOffset, PAGE_SIZE);
         setRows(page.rows);
         setTotal(page.total);
+        setNsfwHidden(page.nsfwHidden);
         setFailure(null);
       } catch (error) {
         setFailure(errorMessage(error));
@@ -113,6 +124,41 @@ export const Store = ({ status, onChanged }: Props) => {
     }
   };
 
+  // The peer runs this same check on the art we would send it, so an offer that
+  // fails here would come back declined. Saying so now saves a paid call, and
+  // says which chip is wrong rather than only that something was.
+  const offerFailure = useCallback(
+    (
+      row: StoreRow,
+      candidate: { art: { palette: string[]; pixels: string }; nsfw: boolean },
+    ): FailureCode | null =>
+      check(
+        row.requirements,
+        measure(decodePixels(candidate.art.pixels), candidate.art.palette),
+        candidate.nsfw,
+      ),
+    [],
+  );
+
+  const ownOffers = useMemo(
+    () =>
+      offerFor === null
+        ? []
+        : ownDesigns.map((design) => ({
+            design,
+            failure: offerFailure(offerFor, design),
+          })),
+    [offerFailure, offerFor, ownDesigns],
+  );
+
+  const heldOffers = useMemo(
+    () =>
+      offerFor === null
+        ? []
+        : heldChips.map((chip) => ({ chip, failure: offerFailure(offerFor, chip) })),
+    [heldChips, offerFailure, offerFor],
+  );
+
   const propose = async (
     row: StoreRow,
     offer: { kind: "own"; designId: number } | { kind: "held"; chipKey: string },
@@ -143,6 +189,9 @@ export const Store = ({ status, onChanged }: Props) => {
         <h2 className="nt-section-heading">Store</h2>
         <span className="nt-section-count">
           {total} chip{total === 1 ? "" : "s"} · {filterLabel(filter)}
+          {nsfwHidden > 0
+            ? ` · ${nsfwHidden} NSFW hidden`
+            : ""}
         </span>
       </header>
 
@@ -151,7 +200,8 @@ export const Store = ({ status, onChanged }: Props) => {
           [
             ["ownership", OWNERSHIP_OPTIONS],
             ["designerOwnership", DESIGNER_OPTIONS],
-            ["tradeMode", TRADE_MODE_OPTIONS],
+            ["policy", POLICY_OPTIONS],
+            ["nsfw", NSFW_OPTIONS],
           ] as const
         ).map(([key, options]) => (
           <div className="nt-segmented" key={key}>
@@ -211,9 +261,7 @@ export const Store = ({ status, onChanged }: Props) => {
                 <span className="nt-meta" title={row.designer}>
                   {row.contactName ?? shortPrincipal(row.designer)}
                 </span>
-                <span className="nt-tag">
-                  {row.tradeMode === "auto" ? "accepts any trade" : "designer approves"}
-                </span>
+                <PolicyBadges nsfw={row.nsfw} requirements={row.requirements} />
                 {row.owned ? <span className="nt-tag nt-tag--success">owned</span> : null}
                 <span className="nt-meta">
                   seen {formatTimestamp(row.fetchedAtNs)}
@@ -262,21 +310,24 @@ export const Store = ({ status, onChanged }: Props) => {
             Offer a chip for “{offerFor.title}”
           </h3>
           <p className="nt-help">
-            {offerFor.tradeMode === "auto"
-              ? "This designer accepts any chip, so the swap completes immediately."
-              : "This designer approves each trade, so your chip waits with them until they decide."}
+            {describeRequirements(offerFor.requirements).length === 0
+              ? "This designer asks for nothing in particular, so the swap completes immediately."
+              : `This designer asks for ${describeRequirements(offerFor.requirements).join(", ")}.`}
+            {offerFor.requirements.approval
+              ? " Your chip waits with them until they decide."
+              : ""}
           </p>
 
           <h4 className="nt-label">Your own designs</h4>
-          {ownDesigns.length === 0 ? (
+          {ownOffers.length === 0 ? (
             <p className="nt-muted">Publish a design to offer copies of it.</p>
           ) : (
             <ul className="chipswap-offer-list">
-              {ownDesigns.map((design) => (
+              {ownOffers.map(({ design, failure }) => (
                 <li key={design.designId}>
                   <button
                     className="nt-button nt-button--sm"
-                    disabled={busy}
+                    disabled={busy || failure !== null}
                     onClick={() =>
                       void propose(offerFor, {
                         kind: "own",
@@ -287,22 +338,26 @@ export const Store = ({ status, onChanged }: Props) => {
                   >
                     {design.title}
                   </button>
-                  <span className="nt-meta">mints a new copy — you keep yours</span>
+                  <span className="nt-meta">
+                    {failure === null
+                      ? "mints a new copy — you keep yours"
+                      : `refused: it ${failureMessage(failure)}`}
+                  </span>
                 </li>
               ))}
             </ul>
           )}
 
           <h4 className="nt-label">Chips you hold</h4>
-          {heldChips.length === 0 ? (
+          {heldOffers.length === 0 ? (
             <p className="nt-muted">No tradeable chips in your collection.</p>
           ) : (
             <ul className="chipswap-offer-list">
-              {heldChips.map((chip) => (
+              {heldOffers.map(({ chip, failure }) => (
                 <li key={chip.key}>
                   <button
                     className="nt-button nt-button--secondary nt-button--sm"
-                    disabled={busy}
+                    disabled={busy || failure !== null}
                     onClick={() =>
                       void propose(offerFor, { kind: "held", chipKey: chip.key })
                     }
@@ -310,7 +365,11 @@ export const Store = ({ status, onChanged }: Props) => {
                   >
                     {chip.title} #{chip.serial}
                   </button>
-                  <span className="nt-meta">you will no longer own this chip</span>
+                  <span className="nt-meta">
+                    {failure === null
+                      ? "you will no longer own this chip"
+                      : `refused: it ${failureMessage(failure)}`}
+                  </span>
                 </li>
               ))}
             </ul>

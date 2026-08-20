@@ -5,7 +5,7 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Chipswap "../backend/main";
-import Memory "../backend/memory/chipswap/v1";
+import Memory "../backend/memory/chipswap/v2";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
 
@@ -112,9 +112,50 @@ switch (
     case (#err(error)) assert (error.code == "palette_invalid");
 };
 
-switch (chipswap.chipswap_publish({ design_id = 1; expected_revision = 2; trade_mode = "auto" })) {
+// Published with one requirement about the artwork and one about the tag, so
+// the catalog, the store, and the trade route all have something to carry.
+switch (
+    chipswap.chipswap_publish({
+        design_id = 1;
+        expected_revision = 2;
+        approval = false;
+        min_colors = ?2;
+        max_coverage = null;
+        nsfw_rule = "disallowed";
+        nsfw = false;
+    })
+) {
     case (#ok(_)) {};
     case (#err(error)) Runtime.trap("publish: " # error.code);
+};
+
+// A requirement that restricts nothing is refused, and so is a rule that is
+// not one of the three.
+switch (
+    chipswap.chipswap_set_trade_policy({
+        design_id = 1;
+        approval = false;
+        min_colors = ?1;
+        max_coverage = null;
+        nsfw_rule = "any";
+        nsfw = false;
+    })
+) {
+    case (#ok(_)) Runtime.trap("expected a requirements error");
+    case (#err(error)) assert (error.code == "requirements_invalid");
+};
+switch (
+    chipswap.chipswap_set_trade_policy({
+        design_id = 1;
+        approval = false;
+        min_colors = null;
+        max_coverage = null;
+        nsfw_rule = "maybe";
+        nsfw = false;
+    })
+) {
+    case (#ok(_)) Runtime.trap("expected an NSFW rule error");
+    case (#err(error)) assert (error.code == "nsfw_rule_invalid");
 };
 
 // A peer asks for the catalog: only published designs travel, in CSW1 form.
@@ -122,7 +163,10 @@ let catalogBytes = chipswap.chipswap_catalog_v1({ directory = [] }, peer);
 let ?catalog = Wire.decodeCatalogReply(catalogBytes) else Runtime.trap("catalog decode");
 assert (catalog.designs.size() == 1);
 assert (catalog.designs[0].design_id == 1);
-assert (catalog.designs[0].trade_mode == #auto);
+assert (not catalog.designs[0].requirements.approval);
+assert (catalog.designs[0].requirements.min_colors == ?2);
+assert (catalog.designs[0].requirements.nsfw == ? #disallowed);
+assert (not catalog.designs[0].nsfw);
 assert (catalog.designs[0].art.pixels.size() == Shape.PIXEL_COUNT);
 
 // The peer trades one of their chips for it. Auto mode answers in one call.
@@ -138,6 +182,7 @@ let offered : Chipswap.PeerChip = {
             Array.tabulate<Nat8>(Shape.PIXEL_COUNT, func(i) { Nat8.fromNat(i % 2) })
         );
     };
+    nsfw = null;
     design_revision = 1;
     minted_at_ns = 5;
 };
@@ -252,7 +297,8 @@ switch (
 let store = chipswap.chipswap_store({
     ownership = "all";
     designer_ownership = "all";
-    trade_mode = "all";
+    policy = "all";
+    nsfw = "hide";
     offset = 0;
     limit = 20;
 });

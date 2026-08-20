@@ -5,12 +5,14 @@ import Map "mo:core/Map";
 import Nat "mo:core/Nat";
 import Nat8 "mo:core/Nat8";
 import Text "mo:core/Text";
-import Memory "./memory/chipswap/v1";
+import Memory "./memory/chipswap/v2";
+import Requirements "./Requirements";
 import Shape "./Shape";
 
 // The ten design slots and their lifecycle. A draft occupies a slot until it is
 // deleted or published; publishing consumes the slot permanently and freezes the
-// title and art. Only the trade mode stays mutable afterwards.
+// title and art. Only the trade policy — what a designer asks in exchange, and
+// whether the chip carries an NSFW tag — stays mutable afterwards.
 module {
     public type Result<T> = { #ok : T; #err : Text };
 
@@ -58,7 +60,10 @@ module {
                     );
                 };
                 state = #draft;
-                trade_mode = #auto;
+                // A new draft asks nothing of anyone: whoever wants it may swap
+                // for it. Requirements are added deliberately, never inherited.
+                requirements = Memory.openRequirements();
+                nsfw = false;
                 revision = 1;
                 created_at_ns = now;
                 published_at_ns = null;
@@ -119,12 +124,14 @@ module {
         mem : Memory.Mem,
         id : Nat,
         expectedRevision : Nat,
-        mode : Memory.TradeMode,
+        requirements : Memory.TradeRequirements,
+        nsfw : Bool,
         now : Int,
     ) : Result<()> {
         let ?design = get(mem, id) else return #err("not_found");
         if (design.state == #published) return #err("immutable");
         if (design.revision != expectedRevision) return #err("revision_conflict");
+        if (not Requirements.valid(requirements)) return #err("requirements_invalid");
         switch (
             Shape.validateArt(design.art.shape_id, design.art.palette.size(), design.art.pixels)
         ) {
@@ -138,20 +145,25 @@ module {
             {
                 design with
                 state = #published;
-                trade_mode = mode;
+                requirements;
+                nsfw;
                 published_at_ns = ?now;
             } : Memory.Design,
         );
         #ok(());
     };
 
-    public func setTradeMode(
+    // Policy and label together, because they are the two things about a design
+    // that survive publication and they are always edited in one breath.
+    public func setTradePolicy(
         mem : Memory.Mem,
         id : Nat,
-        mode : Memory.TradeMode,
+        requirements : Memory.TradeRequirements,
+        nsfw : Bool,
     ) : Result<()> {
         let ?design = get(mem, id) else return #err("not_found");
-        Map.add(mem.designs, Nat.compare, id, { design with trade_mode = mode });
+        if (not Requirements.valid(requirements)) return #err("requirements_invalid");
+        Map.add(mem.designs, Nat.compare, id, { design with requirements; nsfw });
         #ok(());
     };
 
@@ -176,6 +188,10 @@ module {
             ref = { designer = self; design_id = id; serial };
             title = design.title;
             art = design.art;
+            // Read off the design once, here. A designer may retag their design
+            // later; a chip that has already changed hands keeps what it left
+            // with, so nobody's collection is relabelled behind their back.
+            nsfw = design.nsfw;
             design_revision = design.revision;
             minted_at_ns = now;
             acquired_at_ns = now;

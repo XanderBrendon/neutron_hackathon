@@ -5,7 +5,7 @@ import Map "mo:core/Map";
 import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Text "mo:core/Text";
-import Memory "../backend/memory/chipswap/v1";
+import Memory "../backend/memory/chipswap/v2";
 
 // A clean install starts empty and every managed root is reachable.
 let mem = Memory.init();
@@ -36,7 +36,8 @@ let design : Memory.Design = {
     title = "First";
     art;
     state = #draft;
-    trade_mode = #auto;
+    requirements = Memory.openRequirements();
+    nsfw = false;
     revision = 1;
     created_at_ns = 10;
     published_at_ns = null;
@@ -46,11 +47,18 @@ Map.add(mem.designs, Nat.compare, 1, design);
 let ?storedDesign = Map.get(mem.designs, Nat.compare, 1) else Runtime.trap("missing entry");
 assert (storedDesign.title == "First");
 assert (storedDesign.state == #draft);
+// A fresh design asks for nothing: no approval, no requirement, no tag.
+assert (not storedDesign.requirements.approval);
+assert (storedDesign.requirements.min_colors == null);
+assert (storedDesign.requirements.max_coverage == null);
+assert (storedDesign.requirements.nsfw == null);
+assert (not storedDesign.nsfw);
 
 let chip : Memory.Chip = {
     ref = { designer; design_id = 1; serial = 3 };
     title = "First";
     art;
+    nsfw = false;
     design_revision = 1;
     minted_at_ns = 20;
     acquired_at_ns = 21;
@@ -80,14 +88,26 @@ let cached : Memory.CachedCatalog = {
         design_id = 2;
         title = "Peer chip";
         art;
-        trade_mode = #manual;
+        requirements = {
+            approval = true;
+            min_colors = ?6;
+            max_coverage = ?40;
+            nsfw = ? #disallowed;
+        };
+        nsfw = true;
         design_revision = 4;
         published_at_ns = 12;
     }];
 };
 Map.add(mem.catalog_cache, Principal.compare, peer, cached);
 let ?storedCatalog = Map.get(mem.catalog_cache, Principal.compare, peer) else Runtime.trap("missing entry");
-assert (storedCatalog.designs[0].trade_mode == #manual);
+// A cached design carries the whole policy, because the store reads it from
+// here and an offer is pre-checked against it before a call is paid for.
+assert (storedCatalog.designs[0].requirements.approval);
+assert (storedCatalog.designs[0].requirements.min_colors == ?6);
+assert (storedCatalog.designs[0].requirements.max_coverage == ?40);
+assert (storedCatalog.designs[0].requirements.nsfw == ? #disallowed);
+assert (storedCatalog.designs[0].nsfw);
 
 let requestId = Blob.fromArray([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16]);
 
@@ -122,7 +142,7 @@ assert (storedOutbound.state == #sending);
 let replay : Memory.ReplayRecord = {
     request_id = requestId;
     peer;
-    outcome = #minted({ design_id = 1; serial = 7 });
+    outcome = #minted({ design_id = 1; serial = 7; nsfw = true });
     recorded_at_ns = 60;
 };
 Map.add(mem.replay, Text.compare, "replay", replay);

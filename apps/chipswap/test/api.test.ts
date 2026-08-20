@@ -13,6 +13,7 @@ import {
   parseIncomingTrade,
   parseOutgoingTrade,
   parseStatus,
+  parseRequirements,
   parseStoreRow,
   parseSuggestion,
   shortPrincipal,
@@ -26,6 +27,8 @@ const ART = {
   pixels: PIXELS,
 };
 
+const OPEN_REQUIREMENTS = { approval: false, nsfw: "any" };
+
 const CHIP = {
   key: "aaaaa-aa.1.2",
   designer: "aaaaa-aa",
@@ -33,6 +36,7 @@ const CHIP = {
   serial: "2",
   title: "Sunrise",
   art: ART,
+  nsfw: false,
   design_revision: "3",
   minted_at_ns: "1700000000000000000",
   acquired_at_ns: "1700000000000000001",
@@ -67,13 +71,46 @@ test("art is validated before it reaches the canvas", () => {
   expect(() => parseArt(null)).toThrow();
 });
 
+test("an unset requirement arrives as an absent field, not a sentinel", () => {
+  // Motoko omits a null optional entirely, so a requirement that is off is a
+  // field that is not there rather than a zero that would read as a limit.
+  expect(parseRequirements(OPEN_REQUIREMENTS)).toEqual({
+    approval: false,
+    minColors: null,
+    maxCoverage: null,
+    nsfw: "any",
+  });
+  expect(
+    parseRequirements({
+      approval: true,
+      min_colors: "6",
+      max_coverage: "40",
+      nsfw: "disallowed",
+    }),
+  ).toEqual({
+    approval: true,
+    minColors: 6,
+    maxCoverage: 40,
+    nsfw: "disallowed",
+  });
+  // A rule that is not one of the three is refused rather than read as "any".
+  expect(() =>
+    parseRequirements({ ...OPEN_REQUIREMENTS, nsfw: "maybe" }),
+  ).toThrow();
+  expect(() => parseRequirements({ approval: false })).toThrow();
+  expect(() =>
+    parseRequirements({ ...OPEN_REQUIREMENTS, min_colors: "x" }),
+  ).toThrow();
+});
+
 test("designs parse with their optional publication time", () => {
   const draft = parseDesign({
     design_id: "1",
     title: "Sunrise",
     art: ART,
     state: "draft",
-    trade_mode: "auto",
+    requirements: OPEN_REQUIREMENTS,
+    nsfw: false,
     revision: "2",
     created_at_ns: "100",
     minted_count: "0",
@@ -81,20 +118,33 @@ test("designs parse with their optional publication time", () => {
   expect(draft.designId).toBe(1);
   expect(draft.state).toBe("draft");
   expect(draft.publishedAtNs).toBeNull();
+  expect(draft.requirements.minColors).toBeNull();
 
   const published = parseDesign({
     design_id: "1",
     title: "Sunrise",
     art: ART,
     state: "published",
-    trade_mode: "manual",
+    requirements: {
+      approval: true,
+      min_colors: "4",
+      max_coverage: "60",
+      nsfw: "required",
+    },
+    nsfw: true,
     revision: "2",
     created_at_ns: "100",
     published_at_ns: "200",
     minted_count: "5",
   });
   expect(published.publishedAtNs).toBe("200");
-  expect(published.tradeMode).toBe("manual");
+  expect(published.requirements).toEqual({
+    approval: true,
+    minColors: 4,
+    maxCoverage: 60,
+    nsfw: "required",
+  });
+  expect(published.nsfw).toBe(true);
   expect(published.mintedCount).toBe(5);
 
   expect(() => parseDesign({ ...draft, state: "archived" })).toThrow();
@@ -170,7 +220,8 @@ test("directory and store rows carry the ownership flags the filters use", () =>
     design_id: "2",
     title: "Peer chip",
     art: ART,
-    trade_mode: "auto",
+    requirements: { approval: false, min_colors: "3", nsfw: "any" },
+    nsfw: true,
     design_revision: "1",
     owned: true,
     owns_designer: true,
@@ -180,6 +231,11 @@ test("directory and store rows carry the ownership flags the filters use", () =>
   expect(row.owned).toBe(true);
   expect(row.ownsDesigner).toBe(true);
   expect(row.contactName).toBe("Grace");
+  // The row carries the whole policy, because the store pre-checks an offer
+  // against it before paying for a call.
+  expect(row.requirements.minColors).toBe(3);
+  expect(row.requirements.maxCoverage).toBeNull();
+  expect(row.nsfw).toBe(true);
 });
 
 test("trades parse in both directions", () => {
@@ -195,6 +251,7 @@ test("trades parse in both directions", () => {
   });
   expect(incoming.state).toBe("pending");
   expect(incoming.offered.serial).toBe(2);
+  expect(incoming.offered.nsfw).toBe(false);
 
   const outgoing = parseOutgoingTrade({
     request_id: "0a0b",

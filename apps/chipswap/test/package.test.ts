@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 104,
+    version: 105,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -54,11 +54,16 @@ test("chipswap manifest validates and declares its identity and tile", async () 
         icon: "static/icon.svg",
       },
     ],
+    // Requirements and the NSFW tag changed the persistent shape, so v1 stays
+    // exactly as released and v2 arrives beside it with one path between them.
     memory: {
       chipswap: {
-        version: 1,
-        schemas: { 1: { src: "memory/chipswap/v1.mo" } },
-        migrations: [],
+        version: 2,
+        schemas: {
+          1: { src: "memory/chipswap/v1.mo" },
+          2: { src: "memory/chipswap/v2.mo" },
+        },
+        migrations: [{ from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" }],
       },
     },
   });

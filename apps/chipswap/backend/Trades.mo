@@ -10,7 +10,8 @@ import Text "mo:core/Text";
 import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v1";
+import Memory "./memory/chipswap/v2";
+import Requirements "./Requirements";
 import Shape "./Shape";
 import Wire "./Wire";
 
@@ -83,6 +84,7 @@ module {
             serial = chip.ref.serial;
             title = chip.title;
             art = chip.art;
+            nsfw = chip.nsfw;
             design_revision = chip.design_revision;
             minted_at_ns = chip.minted_at_ns;
         };
@@ -97,6 +99,10 @@ module {
             };
             title = chip.title;
             art = chip.art;
+            // The tag is the offering canister's claim about its own art, kept
+            // as given. It is the one part of a chip we cannot check, and a
+            // requirement that turns on it says so.
+            nsfw = chip.nsfw;
             design_revision = chip.design_revision;
             minted_at_ns = chip.minted_at_ns;
             acquired_at_ns = now;
@@ -397,55 +403,64 @@ module {
             return #declined({ reason = "duplicate_offer"; directory = share });
         };
 
-        switch (design.trade_mode) {
-            case (#auto) {
-                if (Holdings.count(mem) >= Holdings.MAX_HOLDINGS) {
-                    return #declined({ reason = "holdings_full"; directory = share });
-                };
-                switch (Holdings.admit(mem, offeredChip)) {
-                    case (#err(code)) return #declined({ reason = code; directory = share });
-                    case (#ok(())) {};
-                };
-                switch (Designs.mint(mem, request.want_design_id, self, now)) {
-                    case (#err(code)) return #declined({ reason = code; directory = share });
-                    case (#ok(minted)) {
-                        recordReplay(
-                            mem,
-                            key,
-                            caller,
-                            request.request_id,
-                            #minted({
-                                design_id = request.want_design_id;
-                                serial = minted.ref.serial;
-                            }),
-                            now,
-                        );
-                        #minted({ chip = chipToWire(minted); directory = share });
-                    };
-                };
+        // Requirements are settled before anything is held or minted. An offer
+        // that does not meet them is refused outright, whether or not the
+        // designer also wanted to approve it by hand: approval decides what
+        // becomes of an offer that qualifies, not whether it qualifies.
+        switch (
+            Requirements.checkArt(design.requirements, offeredChip.art, offeredChip.nsfw)
+        ) {
+            case (?reason) return #declined({ reason; directory = share });
+            case null {};
+        };
+
+        if (not design.requirements.approval) {
+            if (Holdings.count(mem) >= Holdings.MAX_HOLDINGS) {
+                return #declined({ reason = "holdings_full"; directory = share });
             };
-            case (#manual) {
-                if (Map.size(mem.incoming) >= MAX_INCOMING) {
-                    return #declined({ reason = "incoming_full"; directory = share });
+            switch (Holdings.admit(mem, offeredChip)) {
+                case (#err(code)) return #declined({ reason = code; directory = share });
+                case (#ok(())) {};
+            };
+            switch (Designs.mint(mem, request.want_design_id, self, now)) {
+                case (#err(code)) return #declined({ reason = code; directory = share });
+                case (#ok(minted)) {
+                    recordReplay(
+                        mem,
+                        key,
+                        caller,
+                        request.request_id,
+                        #minted({
+                            design_id = request.want_design_id;
+                            serial = minted.ref.serial;
+                            nsfw = minted.nsfw;
+                        }),
+                        now,
+                    );
+                    return #minted({ chip = chipToWire(minted); directory = share });
                 };
-                Map.add(
-                    mem.incoming,
-                    Text.compare,
-                    key,
-                    {
-                        request_id = request.request_id;
-                        peer = caller;
-                        want_design_id = request.want_design_id;
-                        offered = offeredChip;
-                        state = #pending;
-                        received_at_ns = now;
-                        updated_at_ns = now;
-                    } : Memory.IncomingTrade,
-                );
-                recordReplay(mem, key, caller, request.request_id, #pending, now);
-                #pending({ directory = share });
             };
         };
+
+        if (Map.size(mem.incoming) >= MAX_INCOMING) {
+            return #declined({ reason = "incoming_full"; directory = share });
+        };
+        Map.add(
+            mem.incoming,
+            Text.compare,
+            key,
+            {
+                request_id = request.request_id;
+                peer = caller;
+                want_design_id = request.want_design_id;
+                offered = offeredChip;
+                state = #pending;
+                received_at_ns = now;
+                updated_at_ns = now;
+            } : Memory.IncomingTrade,
+        );
+        recordReplay(mem, key, caller, request.request_id, #pending, now);
+        #pending({ directory = share });
     };
 
     public func acceptPending(
@@ -471,7 +486,7 @@ module {
             key,
             {
                 trade with
-                state = #accepted({ serial = minted.ref.serial });
+                state = #accepted({ serial = minted.ref.serial; nsfw = minted.nsfw });
                 updated_at_ns = now;
             } : Memory.IncomingTrade,
         );
@@ -480,7 +495,11 @@ module {
             key,
             trade.peer,
             requestId,
-            #minted({ design_id = trade.want_design_id; serial = minted.ref.serial }),
+            #minted({
+                design_id = trade.want_design_id;
+                serial = minted.ref.serial;
+                nsfw = minted.nsfw;
+            }),
             now,
         );
         #ok({
@@ -525,7 +544,13 @@ module {
         switch (trade.state) {
             case (#accepted(details)) {
                 let ?design = Designs.get(mem, trade.want_design_id) else return #err("not_found");
-                let chip = mintedView(design, details.serial, trade.updated_at_ns, self);
+                let chip = mintedView(
+                    design,
+                    details.serial,
+                    trade.updated_at_ns,
+                    self,
+                    details.nsfw,
+                );
                 #ok({
                     peer = trade.peer;
                     request_id = requestId;
@@ -570,7 +595,13 @@ module {
                     case (#accepted(details)) {
                         let ?design = Designs.get(mem, trade.want_design_id) else return #unknown;
                         return #minted({
-                            chip = mintedView(design, details.serial, trade.updated_at_ns, self)
+                            chip = mintedView(
+                                design,
+                                details.serial,
+                                trade.updated_at_ns,
+                                self,
+                                details.nsfw,
+                            )
                         });
                     };
                     case (#declined) return #declined({ reason = "designer_declined" });
@@ -587,7 +618,13 @@ module {
                     case (#minted(details)) {
                         let ?design = Designs.get(mem, details.design_id) else return #unknown;
                         #minted({
-                            chip = mintedView(design, details.serial, record.recorded_at_ns, self)
+                            chip = mintedView(
+                                design,
+                                details.serial,
+                                record.recorded_at_ns,
+                                self,
+                                details.nsfw,
+                            )
                         });
                     };
                 };
@@ -713,11 +750,15 @@ module {
         #ok("completed");
     };
 
+    // The chip as it was minted, rebuilt from what was recorded. The tag comes
+    // from the record rather than from the design, because the design's tag may
+    // have moved since and this chip did not.
     func mintedView(
         design : Memory.Design,
         serial : Nat,
         mintedAt : Int,
         self : Principal,
+        nsfw : Bool,
     ) : Wire.Chip {
         {
             designer = self;
@@ -725,6 +766,7 @@ module {
             serial;
             title = design.title;
             art = design.art;
+            nsfw;
             design_revision = design.revision;
             minted_at_ns = mintedAt;
         };
@@ -767,7 +809,13 @@ module {
             case (#minted(details)) {
                 let ?design = Designs.get(mem, details.design_id) else return null;
                 ?#minted({
-                    chip = mintedView(design, details.serial, record.recorded_at_ns, self);
+                    chip = mintedView(
+                        design,
+                        details.serial,
+                        record.recorded_at_ns,
+                        self,
+                        details.nsfw,
+                    );
                     directory = [];
                 });
             };

@@ -5,7 +5,8 @@ import Nat32 "mo:core/Nat32";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Designs "../backend/Designs";
-import Memory "../backend/memory/chipswap/v1";
+import Memory "../backend/memory/chipswap/v2";
+import Requirements "../backend/Requirements";
 import Shape "../backend/Shape";
 
 let self = Principal.fromBlob(Blob.fromArray([0, 1, 1]));
@@ -99,26 +100,68 @@ assert (
     ) == "pixel_count"
 );
 
-// Publishing freezes the art and consumes the slot permanently.
-assert (expectOk(Designs.publish(mem, 1, 2, #manual, 300)) == ());
+// A new draft asks nothing of anyone.
+let ?opened = Designs.get(mem, 1) else Runtime.trap("design missing");
+assert (Requirements.open(opened.requirements));
+assert (not opened.nsfw);
+
+// Publishing freezes the art, sets the policy, and consumes the slot forever.
+let strict : Memory.TradeRequirements = {
+    approval = true;
+    min_colors = ?6;
+    max_coverage = ?40;
+    nsfw = ? #disallowed;
+};
+assert (expectOk(Designs.publish(mem, 1, 2, strict, true, 300)) == ());
 let ?published = Designs.get(mem, 1) else Runtime.trap("design missing");
 assert (published.state == #published);
-assert (published.trade_mode == #manual);
+assert (published.requirements == strict);
+assert (published.nsfw);
 assert (published.published_at_ns == ?300);
 assert (published.revision == 2);
 assert (expectErr(Designs.save(mem, 1, 2, "After", palette, flatPixels(0))) == "immutable");
 assert (expectErr(Designs.delete(mem, 1)) == "immutable");
-assert (expectErr(Designs.publish(mem, 1, 2, #auto, 320)) == "immutable");
+assert (
+    expectErr(Designs.publish(mem, 1, 2, Memory.openRequirements(), false, 320)) == "immutable"
+);
 assert (Designs.slotsUsed(mem) == 10);
 
-// Trade mode stays mutable after publication because it is policy, not art.
-assert (expectOk(Designs.setTradeMode(mem, 1, #auto)) == ());
+// A requirement that restricts nothing is refused rather than stored, at
+// publication and afterwards alike.
+let ?stillDraft = Designs.get(mem, 2) else Runtime.trap("design missing");
+assert (stillDraft.state == #draft);
+assert (
+    expectErr(
+        Designs.publish(
+            mem,
+            2,
+            stillDraft.revision,
+            { Memory.openRequirements() with min_colors = ?1 },
+            false,
+            330,
+        )
+    ) == "requirements_invalid"
+);
+assert (
+    expectErr(
+        Designs.setTradePolicy(mem, 1, { strict with max_coverage = ?100 }, true)
+    ) == "requirements_invalid"
+);
+
+// Policy and tag stay mutable after publication because they are not art.
+assert (expectOk(Designs.setTradePolicy(mem, 1, Memory.openRequirements(), false)) == ());
 let ?policy = Designs.get(mem, 1) else Runtime.trap("design missing");
-assert (policy.trade_mode == #auto);
-assert (expectErr(Designs.setTradeMode(mem, 99, #auto)) == "not_found");
+assert (Requirements.open(policy.requirements));
+assert (not policy.nsfw);
+assert (
+    expectErr(Designs.setTradePolicy(mem, 99, Memory.openRequirements(), false)) == "not_found"
+);
 
 // Minting an instance of a published design increments the serial.
 let firstChip = expectOk(Designs.mint(mem, 1, self, 400));
+// The tag is read off the design at minting. This one was untagged a moment
+// ago, so the chip is untagged even though it was tagged when it published.
+assert (not firstChip.nsfw);
 assert (firstChip.ref.designer == self);
 assert (firstChip.ref.design_id == 1);
 assert (firstChip.ref.serial == 1);
@@ -136,7 +179,7 @@ let visible = Designs.published(mem);
 assert (visible.size() == 1);
 assert (visible[0].design_id == 1);
 
-assert (expectOk(Designs.publish(mem, 3, 1, #auto, 500)) == ());
+assert (expectOk(Designs.publish(mem, 3, 1, Memory.openRequirements(), false, 500)) == ());
 let visibleAgain = Designs.published(mem);
 assert (visibleAgain.size() == 2);
 assert (visibleAgain[0].design_id == 1);

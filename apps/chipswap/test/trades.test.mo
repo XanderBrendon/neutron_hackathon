@@ -8,7 +8,7 @@ import Text "mo:core/Text";
 import Designs "../backend/Designs";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v1";
+import Memory "../backend/memory/chipswap/v2";
 import Shape "../backend/Shape";
 import Trades "../backend/Trades";
 import Wire "../backend/Wire";
@@ -34,6 +34,7 @@ func offeredChip(designer : Principal, designId : Nat, serial : Nat) : Wire.Chip
         serial;
         title = "Peer chip";
         art;
+        nsfw = false;
         design_revision = 1;
         minted_at_ns = 50;
     };
@@ -57,18 +58,25 @@ func expectErr<T>(result : Trades.Result<T>) : Text {
     };
 };
 
-// A designer canister with one auto design and one manual design.
-func designerMemory(autoMode : Bool) : Memory.Mem {
+let OPEN = Memory.openRequirements();
+let APPROVES = { OPEN with approval = true };
+
+// A designer canister with one published design under the given policy.
+func policyMemory(requirements : Memory.TradeRequirements, nsfw : Bool) : Memory.Mem {
     let mem = Memory.init();
     switch (Designs.create(mem, "Auto chip", 10)) {
         case (#ok(_)) {};
         case (#err(code)) Runtime.trap(code);
     };
-    switch (Designs.publish(mem, 1, 1, if (autoMode) #auto else #manual, 20)) {
+    switch (Designs.publish(mem, 1, 1, requirements, nsfw, 20)) {
         case (#ok(())) {};
         case (#err(code)) Runtime.trap(code);
     };
     mem;
+};
+
+func designerMemory(autoMode : Bool) : Memory.Mem {
+    policyMemory(if (autoMode) OPEN else APPROVES, false);
 };
 
 func inbound(id : Blob, designId : Nat, chip : Wire.Chip) : Trades.InboundTrade {
@@ -150,6 +158,161 @@ switch (Trades.acceptInbound(auto, inbound(Blob.fromArray([1, 2, 3]), 1, offered
 switch (Trades.acceptInbound(auto, inbound(requestId(7), 1, firstOffer), bob, alice, 230)) {
     case (#declined(payload)) assert (payload.reason == "duplicate_offer");
     case (_) Runtime.trap("expected duplicate_offer");
+};
+
+// --- Requirements refuse an offer before anything is held ------------------
+
+// The art in these tests alternates two colours pixel by pixel, so it is two
+// colours with the larger holding 379 of the 757: a hair over half.
+let picky = policyMemory(
+    { OPEN with min_colors = ?3; max_coverage = ?50; nsfw = ? #disallowed },
+    false,
+);
+switch (Trades.acceptInbound(picky, inbound(requestId(20), 1, offeredChip(bob, 4, 20)), bob, alice, 300)) {
+    case (#declined(payload)) assert (payload.reason == "min_colors");
+    case (_) Runtime.trap("expected min_colors");
+};
+// Nothing was admitted, nothing was minted, and no replay was recorded: a
+// refusal leaves the designer exactly where it was.
+assert (Holdings.count(picky) == 0);
+assert (Map.size(picky.incoming) == 0);
+assert (Map.size(picky.replay) == 0);
+let ?pickyDesign = Designs.get(picky, 1) else Runtime.trap("design missing");
+assert (pickyDesign.next_serial == 1);
+
+// Three colours clears the minimum, but one of them covers 400 of 757.
+let threeColours : Wire.Art = {
+    shape_id = Shape.SHAPE_ID;
+    palette = [0x101010, 0xffffff, 0x7fd1c1];
+    pixels = Blob.fromArray(
+        Array.tabulate<Nat8>(
+            Shape.PIXEL_COUNT,
+            func(i) { if (i < 400) 0 else if (i < 600) 1 else 2 },
+        )
+    );
+};
+switch (
+    Trades.acceptInbound(
+        picky,
+        inbound(requestId(21), 1, { offeredChip(bob, 4, 21) with art = threeColours }),
+        bob,
+        alice,
+        310,
+    )
+) {
+    case (#declined(payload)) assert (payload.reason == "max_coverage");
+    case (_) Runtime.trap("expected max_coverage");
+};
+
+// Spread more evenly it clears the cap, but the tag refuses it.
+let evenColours : Wire.Art = {
+    threeColours with
+    pixels = Blob.fromArray(
+        Array.tabulate<Nat8>(Shape.PIXEL_COUNT, func(i) { Nat8.fromNat(i % 3) })
+    )
+};
+switch (
+    Trades.acceptInbound(
+        picky,
+        inbound(
+            requestId(22),
+            1,
+            { offeredChip(bob, 4, 22) with art = evenColours; nsfw = true },
+        ),
+        bob,
+        alice,
+        320,
+    )
+) {
+    case (#declined(payload)) assert (payload.reason == "nsfw_disallowed");
+    case (_) Runtime.trap("expected nsfw_disallowed");
+};
+
+// The same chip untagged satisfies everything and the trade completes.
+switch (
+    Trades.acceptInbound(
+        picky,
+        inbound(requestId(23), 1, { offeredChip(bob, 4, 23) with art = evenColours }),
+        bob,
+        alice,
+        330,
+    )
+) {
+    case (#minted(payload)) assert (payload.chip.serial == 1);
+    case (_) Runtime.trap("expected minted");
+};
+assert (Holdings.count(picky) == 1);
+
+// A design that requires the tag refuses what the one above accepted.
+let wantsTagged = policyMemory({ OPEN with nsfw = ? #required }, true);
+switch (
+    Trades.acceptInbound(
+        wantsTagged,
+        inbound(requestId(24), 1, { offeredChip(bob, 4, 24) with art = evenColours }),
+        bob,
+        alice,
+        340,
+    )
+) {
+    case (#declined(payload)) assert (payload.reason == "nsfw_required");
+    case (_) Runtime.trap("expected nsfw_required");
+};
+
+// Requirements are settled before approval, so an offer that fails one is
+// refused rather than held for a designer who would only decline it.
+let pickyApproving = policyMemory({ OPEN with approval = true; min_colors = ?3 }, false);
+switch (
+    Trades.acceptInbound(pickyApproving, inbound(requestId(25), 1, offeredChip(bob, 4, 25)), bob, alice, 350)
+) {
+    case (#declined(payload)) assert (payload.reason == "min_colors");
+    case (_) Runtime.trap("expected min_colors before approval");
+};
+assert (Map.size(pickyApproving.incoming) == 0);
+// The same design holds an offer that qualifies.
+switch (
+    Trades.acceptInbound(
+        pickyApproving,
+        inbound(requestId(26), 1, { offeredChip(bob, 4, 26) with art = evenColours }),
+        bob,
+        alice,
+        360,
+    )
+) {
+    case (#pending(_)) {};
+    case (_) Runtime.trap("expected pending");
+};
+assert (Map.size(pickyApproving.incoming) == 1);
+
+// A chip minted from a tagged design carries the tag to the peer, and keeps it
+// even after the designer retags the design.
+let tagged = policyMemory(OPEN, true);
+switch (
+    Trades.acceptInbound(
+        tagged,
+        inbound(requestId(27), 1, { offeredChip(bob, 4, 27) with art = evenColours }),
+        bob,
+        alice,
+        370,
+    )
+) {
+    case (#minted(payload)) assert (payload.chip.nsfw);
+    case (_) Runtime.trap("expected a tagged mint");
+};
+switch (Designs.setTradePolicy(tagged, 1, OPEN, false)) {
+    case (#ok(())) {};
+    case (#err(code)) Runtime.trap(code);
+};
+switch (
+    Trades.acceptInbound(
+        tagged,
+        inbound(requestId(27), 1, { offeredChip(bob, 4, 27) with art = evenColours }),
+        bob,
+        alice,
+        380,
+    )
+) {
+    case (#minted(payload)) assert (payload.chip.nsfw);
+    case (_) Runtime.trap("expected the replayed chip to keep its tag");
 };
 
 // --- Manual mode: escrow, then accept -------------------------------------
@@ -238,7 +401,7 @@ switch (Designs.create(proposer, "Mine", 10)) {
     case (#ok(_)) {};
     case (#err(code)) Runtime.trap(code);
 };
-switch (Designs.publish(proposer, 1, 1, #auto, 20)) {
+switch (Designs.publish(proposer, 1, 1, OPEN, false, 20)) {
     case (#ok(())) {};
     case (#err(code)) Runtime.trap(code);
 };
@@ -249,7 +412,8 @@ Directory.storeCatalog(
         design_id = 1;
         title = "Alice chip";
         art;
-        trade_mode = #auto;
+        requirements = OPEN;
+        nsfw = false;
         design_revision = 1;
         published_at_ns = 5;
     }],
@@ -335,6 +499,7 @@ let mintedBack : Wire.Chip = {
     serial = 12;
     title = "Alice chip";
     art;
+    nsfw = false;
     design_revision = 1;
     minted_at_ns = 200;
 };
@@ -415,6 +580,7 @@ let delivered : Wire.Chip = {
     serial = 77;
     title = "Alice chip";
     art;
+    nsfw = false;
     design_revision = 1;
     minted_at_ns = 320;
 };
@@ -495,7 +661,7 @@ switch (Designs.create(outgoingBound, "Mine", 10)) {
     case (#ok(_)) {};
     case (#err(code)) Runtime.trap(code);
 };
-switch (Designs.publish(outgoingBound, 1, 1, #auto, 20)) {
+switch (Designs.publish(outgoingBound, 1, 1, OPEN, false, 20)) {
     case (#ok(())) {};
     case (#err(code)) Runtime.trap(code);
 };
@@ -506,7 +672,8 @@ Directory.storeCatalog(
         design_id = 1;
         title = "Alice chip";
         art;
-        trade_mode = #auto;
+        requirements = OPEN;
+        nsfw = false;
         design_revision = 1;
         published_at_ns = 5;
     }],

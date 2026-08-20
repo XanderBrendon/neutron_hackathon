@@ -102,6 +102,9 @@ export const Collection = ({ status, onChanged }: Props) => {
                 <span className="nt-meta">
                   #{chip.serial} · design {chip.designId}
                 </span>
+                {chip.nsfw ? (
+                  <span className="nt-tag nt-tag--warning">NSFW</span>
+                ) : null}
                 <span className="nt-meta" title={chip.designer}>
                   {chip.contactName ?? shortPrincipal(chip.designer)}
                 </span>

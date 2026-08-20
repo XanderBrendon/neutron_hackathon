@@ -13,8 +13,9 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v1";
+import Memory "./memory/chipswap/v2";
 import PrincipalText "./PrincipalText";
+import Requirements "./Requirements";
 import Shape "./Shape";
 import Trades "./Trades";
 import Wire "./Wire";
@@ -97,12 +98,23 @@ module {
         pixels : Text;
     };
 
+    // `nsfw` is the rule the designer set — "any", "disallowed", or "required"
+    // — as text rather than an optional variant, so the whole view stays flat,
+    // which is what the tile's parsers expect.
+    public type RequirementsView = {
+        approval : Bool;
+        min_colors : ?Nat;
+        max_coverage : ?Nat;
+        nsfw : Text;
+    };
+
     public type DesignView = {
         design_id : Nat;
         title : Text;
         art : ArtView;
         state : Text;
-        trade_mode : Text;
+        requirements : RequirementsView;
+        nsfw : Bool;
         revision : Nat;
         created_at_ns : Int;
         published_at_ns : ?Int;
@@ -116,6 +128,7 @@ module {
         serial : Nat;
         title : Text;
         art : ArtView;
+        nsfw : Bool;
         design_revision : Nat;
         minted_at_ns : Int;
         acquired_at_ns : Int;
@@ -173,7 +186,8 @@ module {
         design_id : Nat;
         title : Text;
         art : ArtView;
-        trade_mode : Text;
+        requirements : RequirementsView;
+        nsfw : Bool;
         design_revision : Nat;
         owned : Bool;
         owns_designer : Bool;
@@ -184,6 +198,7 @@ module {
     public type StorePage = {
         rows : [StoreRowView];
         total : Nat;
+        nsfw_hidden : Nat;
     };
 
     public type IncomingTradeView = {
@@ -277,13 +292,27 @@ module {
         pixels : Text;
     };
 
+    // The requirement fields are spelled out rather than nested so publishing
+    // and re-policying take the same shape, and so an omitted requirement is a
+    // null rather than a sentinel number.
     public type PublishRequest = {
         design_id : Nat;
         expected_revision : Nat;
-        trade_mode : Text;
+        approval : Bool;
+        min_colors : ?Nat;
+        max_coverage : ?Nat;
+        nsfw_rule : Text;
+        nsfw : Bool;
     };
 
-    public type TradeModeRequest = { design_id : Nat; trade_mode : Text };
+    public type TradePolicyRequest = {
+        design_id : Nat;
+        approval : Bool;
+        min_colors : ?Nat;
+        max_coverage : ?Nat;
+        nsfw_rule : Text;
+        nsfw : Bool;
+    };
 
     public type DirectoryAddRequest = { canister : Text; source : Text };
 
@@ -294,7 +323,8 @@ module {
     public type StoreRequest = {
         ownership : Text;
         designer_ownership : Text;
-        trade_mode : Text;
+        policy : Text;
+        nsfw : Text;
         offset : Nat;
         limit : Nat;
     };
@@ -337,12 +367,16 @@ module {
         pixels : Blob;
     };
 
+    // `nsfw` is optional so a peer built against the first protocol can still
+    // send us a chip: an absent tag is an untagged chip, which is what a peer
+    // that has never heard of the tag is offering.
     public type PeerChip = {
         designer : Principal;
         design_id : Nat;
         serial : Nat;
         title : Text;
         art : PeerArt;
+        nsfw : ?Bool;
         design_revision : Nat;
         minted_at_ns : Int;
     };
@@ -498,9 +532,12 @@ module {
             let filter = {
                 ownership = request.ownership;
                 designer_ownership = request.designer_ownership;
-                trade_mode = request.trade_mode;
+                policy = request.policy;
+                nsfw = request.nsfw;
             };
-            if (not Directory.validFilter(filter)) return { rows = []; total = 0 };
+            if (not Directory.validFilter(filter)) {
+                return { rows = []; total = 0; nsfw_hidden = 0 };
+            };
             let page = Directory.storeRows(
                 mem,
                 filter,
@@ -516,7 +553,8 @@ module {
                             design_id = row.design_id;
                             title = row.title;
                             art = artView(row.art);
-                            trade_mode = tradeModeText(row.trade_mode);
+                            requirements = requirementsView(row.requirements);
+                            nsfw = row.nsfw;
                             design_revision = row.design_revision;
                             owned = row.owned;
                             owns_designer = row.owns_designer;
@@ -526,6 +564,7 @@ module {
                     },
                 );
                 total = page.total;
+                nsfw_hidden = page.nsfw_hidden;
             };
         };
 
@@ -676,12 +715,26 @@ module {
         };
 
         public func /*update*/chipswap_publish(request : PublishRequest) : RevisionResult {
-            let mode = switch (parseTradeMode(request.trade_mode)) {
+            let requirements = switch (
+                parseRequirements(
+                    request.approval,
+                    request.min_colors,
+                    request.max_coverage,
+                    request.nsfw_rule,
+                )
+            ) {
                 case (#err(code)) return #err(error(code));
                 case (#ok(value)) value;
             };
             switch (
-                Designs.publish(mem, request.design_id, request.expected_revision, mode, Time.now())
+                Designs.publish(
+                    mem,
+                    request.design_id,
+                    request.expected_revision,
+                    requirements,
+                    request.nsfw,
+                    Time.now(),
+                )
             ) {
                 case (#err(code)) #err(error(code));
                 case (#ok(())) {
@@ -691,14 +744,23 @@ module {
             };
         };
 
-        public func /*update*/chipswap_set_trade_mode(
-            request : TradeModeRequest
+        public func /*update*/chipswap_set_trade_policy(
+            request : TradePolicyRequest
         ) : RevisionResult {
-            let mode = switch (parseTradeMode(request.trade_mode)) {
+            let requirements = switch (
+                parseRequirements(
+                    request.approval,
+                    request.min_colors,
+                    request.max_coverage,
+                    request.nsfw_rule,
+                )
+            ) {
                 case (#err(code)) return #err(error(code));
                 case (#ok(value)) value;
             };
-            switch (Designs.setTradeMode(mem, request.design_id, mode)) {
+            switch (
+                Designs.setTradePolicy(mem, request.design_id, requirements, request.nsfw)
+            ) {
                 case (#err(code)) #err(error(code));
                 case (#ok(())) {
                     bump();
@@ -927,7 +989,8 @@ module {
                                         design_id = design.design_id;
                                         title = design.title;
                                         art = design.art;
-                                        trade_mode = design.trade_mode;
+                                        requirements = requirementsFromWire(design.requirements);
+                                        nsfw = design.nsfw;
                                         design_revision = design.design_revision;
                                         published_at_ns = design.published_at_ns;
                                     };
@@ -1054,7 +1117,7 @@ module {
             let payload : PeerTradeRequest = {
                 request_id = proposal.request_id;
                 want_design_id = proposal.want_design_id;
-                offered = proposal.offered;
+                offered = chipToPeer(proposal.offered);
                 directory = Directory.share(mem, self, Directory.MAX_SHARE);
             };
             let reply = await* callRoute(
@@ -1171,7 +1234,8 @@ module {
                         design_id = design.design_id;
                         title = design.title;
                         art = design.art;
-                        trade_mode = design.trade_mode;
+                        requirements = requirementsToWire(design.requirements);
+                        nsfw = design.nsfw;
                         design_revision = design.revision;
                         published_at_ns = switch (design.published_at_ns) {
                             case (?value) value;
@@ -1196,7 +1260,7 @@ module {
                 {
                     request_id = request.request_id;
                     want_design_id = request.want_design_id;
-                    offered = request.offered;
+                    offered = chipFromPeer(request.offered);
                     directory = request.directory;
                 },
                 caller,
@@ -1213,8 +1277,8 @@ module {
         ) : Blob {
             let now = Time.now();
             let outcome : Trades.DeliverOutcome = switch (request.outcome) {
-                case (#minted(chip)) #minted(chip);
-                case (#returned(chip)) #returned(chip);
+                case (#minted(chip)) #minted(chipFromPeer(chip));
+                case (#returned(chip)) #returned(chipFromPeer(chip));
                 case (#declined) #declined;
             };
             ignore Directory.merge(mem, request.directory, self, now);
@@ -1255,8 +1319,8 @@ module {
 
         func deliver(delivery : Trades.Delivery, requestIdText : Text) : async* TradeActionResult {
             let outcome : PeerDeliverOutcome = switch (delivery.outcome) {
-                case (#minted(chip)) #minted(chip);
-                case (#returned(chip)) #returned(chip);
+                case (#minted(chip)) #minted(chipToPeer(chip));
+                case (#returned(chip)) #returned(chipToPeer(chip));
                 case (#declined) #declined;
             };
             let payload : PeerDeliverRequest = {
@@ -1372,7 +1436,8 @@ module {
                     case (#draft) "draft";
                     case (#published) "published";
                 };
-                trade_mode = tradeModeText(design.trade_mode);
+                requirements = requirementsView(design.requirements);
+                nsfw = design.nsfw;
                 revision = design.revision;
                 created_at_ns = design.created_at_ns;
                 published_at_ns = design.published_at_ns;
@@ -1401,6 +1466,7 @@ module {
                 serial = chip.ref.serial;
                 title = chip.title;
                 art = artView(chip.art);
+                nsfw = chip.nsfw;
                 design_revision = chip.design_revision;
                 minted_at_ns = chip.minted_at_ns;
                 acquired_at_ns = chip.acquired_at_ns;
@@ -1446,10 +1512,77 @@ module {
         };
     };
 
-    func tradeModeText(mode : Memory.TradeMode) : Text {
-        switch (mode) {
-            case (#auto) "auto";
-            case (#manual) "manual";
+    func nsfwRuleText(rule : ?Memory.NsfwRule) : Text {
+        switch (rule) {
+            case (?#disallowed) "disallowed";
+            case (?#required) "required";
+            case null "any";
+        };
+    };
+
+    func requirementsView(requirements : Memory.TradeRequirements) : RequirementsView {
+        {
+            approval = requirements.approval;
+            min_colors = requirements.min_colors;
+            max_coverage = requirements.max_coverage;
+            nsfw = nsfwRuleText(requirements.nsfw);
+        };
+    };
+
+    // The wire's requirement set is the schema's, spelled separately so the two
+    // can move apart. Converting by hand is what keeps that promise honest.
+    func requirementsToWire(requirements : Memory.TradeRequirements) : Wire.Requirements {
+        {
+            approval = requirements.approval;
+            min_colors = requirements.min_colors;
+            max_coverage = requirements.max_coverage;
+            nsfw = switch (requirements.nsfw) {
+                case (?#disallowed) ? #disallowed;
+                case (?#required) ? #required;
+                case null null;
+            };
+        };
+    };
+
+    func requirementsFromWire(requirements : Wire.Requirements) : Memory.TradeRequirements {
+        {
+            approval = requirements.approval;
+            min_colors = requirements.min_colors;
+            max_coverage = requirements.max_coverage;
+            nsfw = switch (requirements.nsfw) {
+                case (?#disallowed) ? #disallowed;
+                case (?#required) ? #required;
+                case null null;
+            };
+        };
+    };
+
+    // A chip from a peer that has never heard of the tag is untagged, not
+    // assumed safe by omission in some other sense: an untagged chip is exactly
+    // what a design with no tag mints.
+    func chipFromPeer(chip : PeerChip) : Wire.Chip {
+        {
+            designer = chip.designer;
+            design_id = chip.design_id;
+            serial = chip.serial;
+            title = chip.title;
+            art = chip.art;
+            nsfw = switch (chip.nsfw) { case (?value) value; case null false };
+            design_revision = chip.design_revision;
+            minted_at_ns = chip.minted_at_ns;
+        };
+    };
+
+    func chipToPeer(chip : Wire.Chip) : PeerChip {
+        {
+            designer = chip.designer;
+            design_id = chip.design_id;
+            serial = chip.serial;
+            title = chip.title;
+            art = chip.art;
+            nsfw = ?chip.nsfw;
+            design_revision = chip.design_revision;
+            minted_at_ns = chip.minted_at_ns;
         };
     };
 
@@ -1531,12 +1664,28 @@ module {
         #ok(bytes);
     };
 
-    func parseTradeMode(value : Text) : { #ok : Memory.TradeMode; #err : Text } {
-        switch (value) {
-            case ("auto") #ok(#auto);
-            case ("manual") #ok(#manual);
-            case (_) #err("trade_mode_invalid");
+    // The ranges live in Requirements.mo, so a requirement the owner sets and a
+    // requirement that arrives from a peer are held to the same bounds.
+    func parseRequirements(
+        approval : Bool,
+        minColors : ?Nat,
+        maxCoverage : ?Nat,
+        nsfwRule : Text,
+    ) : { #ok : Memory.TradeRequirements; #err : Text } {
+        let nsfw : ?Memory.NsfwRule = switch (nsfwRule) {
+            case ("any") null;
+            case ("disallowed") ? #disallowed;
+            case ("required") ? #required;
+            case (_) return #err("nsfw_rule_invalid");
         };
+        let requirements : Memory.TradeRequirements = {
+            approval;
+            min_colors = minColors;
+            max_coverage = maxCoverage;
+            nsfw;
+        };
+        if (not Requirements.valid(requirements)) return #err("requirements_invalid");
+        #ok(requirements);
     };
 
     // Principal.fromText traps on malformed input, so owner-supplied text goes
@@ -1594,7 +1743,12 @@ module {
             case ("principal_invalid") "That is not a valid principal.";
             case ("principal_not_canister") "A Chipswap address is a canister principal.";
             case ("too_many_targets") "Refresh at most eight designers at a time.";
-            case ("trade_mode_invalid") "Trade mode is auto or manual.";
+            case ("requirements_invalid") "A colour minimum is 2 to 64, and a coverage cap is 1 to 99 percent.";
+            case ("nsfw_rule_invalid") "The NSFW rule is any, disallowed, or required.";
+            case ("min_colors") "That chip does not use enough colours for this design.";
+            case ("max_coverage") "One colour covers too much of that chip for this design.";
+            case ("nsfw_disallowed") "This design does not accept chips tagged NSFW.";
+            case ("nsfw_required") "This design only accepts chips tagged NSFW.";
             case ("brush_invalid") "That brush shape is not valid.";
             case ("brush_limit") "The brush library is full.";
             case ("not_received") "The designer never received this offer.";
@@ -1644,8 +1798,8 @@ public type chipswap_draft_delete_Output = RevisionResult;
 public type chipswap_publish_Input = (request : PublishRequest);
 public type chipswap_publish_Output = RevisionResult;
 
-public type chipswap_set_trade_mode_Input = (request : TradeModeRequest);
-public type chipswap_set_trade_mode_Output = RevisionResult;
+public type chipswap_set_trade_policy_Input = (request : TradePolicyRequest);
+public type chipswap_set_trade_policy_Output = RevisionResult;
 
 public type chipswap_directory_add_Input = (request : DirectoryAddRequest);
 public type chipswap_directory_add_Output = RevisionResult;

@@ -10,11 +10,13 @@ import {
   publishDesign,
   saveBrush,
   saveDraft,
-  setTradeMode,
+  setTradePolicy,
   type Design,
   type Status,
-  type TradeMode,
+  type TradePolicy,
 } from "../api.ts";
+import { TradePolicyFields } from "../trade_policy.tsx";
+import { openRequirements } from "../requirements.ts";
 import {
   PRESET_BRUSHES,
   blankBrush,
@@ -123,7 +125,12 @@ export const Studio = ({ status, onChanged }: Props) => {
   // taking the paint away: a stamp that missed is worth another go from where
   // it was, not from the beginning.
   const [stampBack, setStampBack] = useState<StampBack | null>(null);
-  const [publishMode, setPublishMode] = useState<TradeMode>("auto");
+  // The policy being edited: what a publish would set, or what a published
+  // design's controls are showing before they are applied.
+  const [policy, setPolicy] = useState<TradePolicy>({
+    requirements: openRequirements(),
+    nsfw: false,
+  });
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
@@ -141,6 +148,15 @@ export const Studio = ({ status, onChanged }: Props) => {
   const blendSource = editor?.palette[blendFrom] ?? "#000000";
   const blendTarget = editor?.palette[blendTo] ?? "#ffffff";
   const blended = blendColors(blendSource, blendTarget, blendRatio);
+  // A published design's controls start as its stored policy, so the save
+  // button has nothing to do until something has actually moved.
+  const policyChanged =
+    selected !== null &&
+    (policy.nsfw !== selected.nsfw ||
+      policy.requirements.approval !== selected.requirements.approval ||
+      policy.requirements.minColors !== selected.requirements.minColors ||
+      policy.requirements.maxCoverage !== selected.requirements.maxCoverage ||
+      policy.requirements.nsfw !== selected.requirements.nsfw);
 
   const reload = useCallback(async () => {
     try {
@@ -189,7 +205,7 @@ export const Studio = ({ status, onChanged }: Props) => {
     setStampBack(null);
     setPicker(false);
     setConfirmPublish(false);
-    setPublishMode(selected.tradeMode);
+    setPolicy({ requirements: selected.requirements, nsfw: selected.nsfw });
   }, [selected?.designId, selected?.revision, selected?.state]);
 
   // The colour flyout dismisses like any menu: Escape, or a press that lands
@@ -494,18 +510,20 @@ export const Studio = ({ status, onChanged }: Props) => {
       await publishDesign({
         designId: current.designId,
         expectedRevision: current.revision,
-        tradeMode: publishMode,
+        requirements: policy.requirements,
+        nsfw: policy.nsfw,
       });
       setConfirmPublish(false);
       await reload();
       setMessage("Published. This chip is now public and permanent.");
     });
 
-  const handleTradeMode = (mode: TradeMode) =>
+  const handleTradePolicy = () =>
     run(async () => {
       if (!selected) return;
-      await setTradeMode(selected.designId, mode);
+      await setTradePolicy(selected.designId, policy);
       await reload();
+      setMessage("Trade requirements saved.");
     });
 
   const handleSaveBrush = () =>
@@ -700,6 +718,9 @@ export const Studio = ({ status, onChanged }: Props) => {
                   })}>
                     {design.state}
                   </span>
+                  {design.nsfw ? (
+                    <span className="nt-tag nt-tag--warning">NSFW</span>
+                  ) : null}
                 </span>
               </button>
             </li>
@@ -854,25 +875,40 @@ export const Studio = ({ status, onChanged }: Props) => {
                 </button>
               </div>
             ) : (
-              <div className="nt-toolbar chipswap-actions">
+              <div className="chipswap-policy-panel">
                 <span className="nt-meta">
-                  Published art is permanent. Trade mode stays yours to change.
+                  Published art is permanent. What you ask for it stays yours to
+                  change, and so does the tag.
                 </span>
-                <div className="nt-segmented">
-                  {(["auto", "manual"] as const).map((mode) => (
-                    <button
-                      aria-pressed={selected.tradeMode === mode}
-                      className={cx("nt-button nt-button--sm", {
-                        "nt-button--secondary": selected.tradeMode !== mode,
-                      })}
-                      disabled={busy}
-                      key={mode}
-                      onClick={() => void handleTradeMode(mode)}
-                      type="button"
-                    >
-                      {mode === "auto" ? "Accept any trade" : "Approve each trade"}
-                    </button>
-                  ))}
+                <TradePolicyFields
+                  disabled={busy}
+                  label="Trade requirements"
+                  onChange={setPolicy}
+                  policy={policy}
+                />
+                <div className="nt-toolbar chipswap-actions">
+                  <button
+                    className="nt-button nt-button--sm"
+                    data-tid="chipswap-save-policy"
+                    disabled={busy || !policyChanged}
+                    onClick={() => void handleTradePolicy()}
+                    type="button"
+                  >
+                    Save requirements
+                  </button>
+                  <button
+                    className="nt-button nt-button--ghost nt-button--sm"
+                    disabled={busy || !policyChanged}
+                    onClick={() =>
+                      setPolicy({
+                        requirements: selected.requirements,
+                        nsfw: selected.nsfw,
+                      })
+                    }
+                    type="button"
+                  >
+                    Discard changes
+                  </button>
                 </div>
               </div>
             )}
@@ -884,20 +920,18 @@ export const Studio = ({ status, onChanged }: Props) => {
                   good. It keeps its slot permanently, and anyone who learns your
                   address can trade for copies.
                 </p>
+                <p className="nt-meta">
+                  Ask for whatever you like in exchange, or nothing at all — an
+                  offer that fails a requirement is refused before it reaches
+                  you. These stay changeable after publishing.
+                </p>
+                <TradePolicyFields
+                  disabled={busy}
+                  label="Trade requirements for this design"
+                  onChange={setPolicy}
+                  policy={policy}
+                />
                 <div className="nt-cluster">
-                  <label className="nt-field">
-                    <span className="nt-label">Trade mode</span>
-                    <select
-                      className="nt-select"
-                      onChange={(event) =>
-                        setPublishMode(event.currentTarget.value as TradeMode)
-                      }
-                      value={publishMode}
-                    >
-                      <option value="auto">Accept any chip automatically</option>
-                      <option value="manual">Approve each trade myself</option>
-                    </select>
-                  </label>
                   <button
                     className="nt-button nt-button--warning nt-button--sm"
                     data-tid="chipswap-publish"

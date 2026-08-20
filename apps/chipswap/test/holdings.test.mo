@@ -4,7 +4,7 @@ import Nat8 "mo:core/Nat8";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v1";
+import Memory "../backend/memory/chipswap/v2";
 import Shape "../backend/Shape";
 
 let alice = Principal.fromBlob(Blob.fromArray([0, 1, 1]));
@@ -22,6 +22,7 @@ func chip(designer : Principal, designId : Nat, serial : Nat) : Memory.Chip {
         ref = { designer; design_id = designId; serial };
         title = "Chip";
         art;
+        nsfw = false;
         design_revision = 1;
         minted_at_ns = 10;
         acquired_at_ns = 20 + serial;

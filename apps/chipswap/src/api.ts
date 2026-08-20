@@ -8,6 +8,9 @@
 import { querySelf, updateSelf, type JsonValue } from "neutron-tools/app";
 import { PIXEL_COUNT } from "./chip.ts";
 import { isHexColor } from "./palette.ts";
+import type { NsfwRule, TradeRequirements } from "./requirements.ts";
+
+export type { NsfwRule, TradeRequirements };
 
 export class ChipswapError extends Error {
   readonly code: string;
@@ -26,14 +29,14 @@ export type Art = {
 };
 
 export type DesignState = "draft" | "published";
-export type TradeMode = "auto" | "manual";
 
 export type Design = {
   designId: number;
   title: string;
   art: Art;
   state: DesignState;
-  tradeMode: TradeMode;
+  requirements: TradeRequirements;
+  nsfw: boolean;
   revision: number;
   createdAtNs: string;
   publishedAtNs: string | null;
@@ -49,6 +52,7 @@ export type Chip = {
   serial: number;
   title: string;
   art: Art;
+  nsfw: boolean;
   designRevision: number;
   mintedAtNs: string;
   acquiredAtNs: string;
@@ -96,7 +100,8 @@ export type StoreRow = {
   designId: number;
   title: string;
   art: Art;
-  tradeMode: TradeMode;
+  requirements: TradeRequirements;
+  nsfw: boolean;
   designRevision: number;
   owned: boolean;
   ownsDesigner: boolean;
@@ -157,7 +162,9 @@ export type Suggestion = {
 export type StoreFilter = {
   ownership: "all" | "owned" | "not_owned";
   designerOwnership: "all" | "owner_of_designer" | "not_owner_of_designer";
-  tradeMode: "all" | "auto" | "manual";
+  policy: "all" | "open" | "approval" | "requirements";
+  /** Tagged chips are left out until they are asked for. */
+  nsfw: "hide" | "show";
 };
 
 export type TradeOutcome = {
@@ -207,6 +214,10 @@ function text(value: unknown, label: string): string {
 
 function optionalText(value: unknown, label: string): string | null {
   return value === undefined || value === null ? null : text(value, label);
+}
+
+function optionalNat(value: unknown, label: string): number | null {
+  return value === undefined || value === null ? null : natNumber(value, label);
 }
 
 function bool(value: unknown, label: string): boolean {
@@ -277,6 +288,20 @@ export function parseArt(value: unknown): Art {
   };
 }
 
+export function parseRequirements(value: unknown): TradeRequirements {
+  const source = record(value, "trade requirements");
+  return {
+    approval: bool(source.approval, "approval flag"),
+    minColors: optionalNat(source.min_colors, "colour minimum"),
+    maxCoverage: optionalNat(source.max_coverage, "coverage cap"),
+    nsfw: oneOf(
+      source.nsfw,
+      ["any", "disallowed", "required"] as const,
+      "NSFW rule",
+    ),
+  };
+}
+
 export function parseDesign(value: unknown): Design {
   const source = record(value, "design");
   return {
@@ -284,7 +309,8 @@ export function parseDesign(value: unknown): Design {
     title: text(source.title, "design title"),
     art: parseArt(source.art),
     state: oneOf(source.state, ["draft", "published"] as const, "design state"),
-    tradeMode: oneOf(source.trade_mode, ["auto", "manual"] as const, "trade mode"),
+    requirements: parseRequirements(source.requirements),
+    nsfw: bool(source.nsfw, "NSFW tag"),
     revision: natNumber(source.revision, "design revision"),
     createdAtNs: nsText(source.created_at_ns, "created time"),
     publishedAtNs: optionalNs(source.published_at_ns, "published time"),
@@ -301,6 +327,7 @@ export function parseChip(value: unknown): Chip {
     serial: natNumber(source.serial, "serial"),
     title: text(source.title, "chip title"),
     art: parseArt(source.art),
+    nsfw: bool(source.nsfw, "NSFW tag"),
     designRevision: natNumber(source.design_revision, "design revision"),
     mintedAtNs: nsText(source.minted_at_ns, "minted time"),
     acquiredAtNs: nsText(source.acquired_at_ns, "acquired time"),
@@ -363,7 +390,8 @@ export function parseStoreRow(value: unknown): StoreRow {
     designId: natNumber(source.design_id, "design id"),
     title: text(source.title, "title"),
     art: parseArt(source.art),
-    tradeMode: oneOf(source.trade_mode, ["auto", "manual"] as const, "trade mode"),
+    requirements: parseRequirements(source.requirements),
+    nsfw: bool(source.nsfw, "NSFW tag"),
     designRevision: natNumber(source.design_revision, "design revision"),
     owned: bool(source.owned, "owned flag"),
     ownsDesigner: bool(source.owns_designer, "designer ownership flag"),
@@ -517,13 +545,14 @@ export async function loadStore(
   filter: StoreFilter,
   offset: number,
   limit: number,
-): Promise<{ rows: StoreRow[]; total: number }> {
+): Promise<{ rows: StoreRow[]; total: number; nsfwHidden: number }> {
   const value = record(
     await querySelf("chipswap_store", [
       {
         ownership: filter.ownership,
         designer_ownership: filter.designerOwnership,
-        trade_mode: filter.tradeMode,
+        policy: filter.policy,
+        nsfw: filter.nsfw,
         offset: String(offset),
         limit: String(limit),
       },
@@ -533,6 +562,7 @@ export async function loadStore(
   return {
     rows: list(value.rows, "store rows").map(parseStoreRow),
     total: natNumber(value.total, "total"),
+    nsfwHidden: natNumber(value.nsfw_hidden, "hidden count"),
   };
 }
 
@@ -606,29 +636,49 @@ export async function deleteDraft(designId: number): Promise<number> {
   );
 }
 
-export async function publishDesign(input: {
-  designId: number;
-  expectedRevision: number;
-  tradeMode: TradeMode;
-}): Promise<number> {
+/** An unset requirement is left out of the record entirely, which is how an
+ *  optional Nat travels: a sentinel number would be a requirement. */
+function policyFields(policy: TradePolicy): Record<string, JsonValue> {
+  return {
+    approval: policy.requirements.approval,
+    ...(policy.requirements.minColors === null
+      ? {}
+      : { min_colors: String(policy.requirements.minColors) }),
+    ...(policy.requirements.maxCoverage === null
+      ? {}
+      : { max_coverage: String(policy.requirements.maxCoverage) }),
+    nsfw_rule: policy.requirements.nsfw,
+    nsfw: policy.nsfw,
+  } as unknown as Record<string, JsonValue>;
+}
+
+/** What a design asks in exchange, and whether it wears the tag itself. */
+export type TradePolicy = {
+  requirements: TradeRequirements;
+  nsfw: boolean;
+};
+
+export async function publishDesign(
+  input: { designId: number; expectedRevision: number } & TradePolicy,
+): Promise<number> {
   return parseRevision(
     await updateSelf("chipswap_publish", [
       {
         design_id: String(input.designId),
         expected_revision: String(input.expectedRevision),
-        trade_mode: input.tradeMode,
+        ...policyFields(input),
       },
     ] as unknown as JsonValue[]),
   );
 }
 
-export async function setTradeMode(
+export async function setTradePolicy(
   designId: number,
-  tradeMode: TradeMode,
+  policy: TradePolicy,
 ): Promise<number> {
   return parseRevision(
-    await updateSelf("chipswap_set_trade_mode", [
-      { design_id: String(designId), trade_mode: tradeMode },
+    await updateSelf("chipswap_set_trade_policy", [
+      { design_id: String(designId), ...policyFields(policy) },
     ] as unknown as JsonValue[]),
   );
 }

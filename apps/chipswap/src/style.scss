@@ -335,6 +335,58 @@
     border-width: 2px;
   }
 
+  /* ---------- trade policy ---------- */
+
+  .chipswap-policy-panel {
+    display: grid;
+    gap: var(--nt-gap-2);
+  }
+
+  /* A column, because each requirement is a sentence: reading down the list is
+     reading what the designer asks for, in order. */
+  .chipswap-policy {
+    border: 0;
+    display: grid;
+    gap: var(--nt-gap-2);
+    margin: 0;
+    min-inline-size: 0;
+    padding: 0;
+  }
+
+  /* The number sits inside the sentence rather than under a label of its own,
+     so a row reads as one clause with a value in the middle of it. */
+  .chipswap-policy-check {
+    align-items: center;
+    display: flex;
+    flex-direction: row;
+    flex-wrap: wrap;
+    gap: var(--nt-gap-2);
+  }
+
+  .chipswap-policy-number {
+    inline-size: 5.5em;
+  }
+
+  /* Held to the width of the longest rule rather than the panel, so it sits
+     with the requirement rows instead of ruling a line across them. */
+  .chipswap-policy select {
+    max-inline-size: 22em;
+  }
+
+  /* Set apart from the requirements above it: this one describes the chip,
+     not what the chip is worth. */
+  .chipswap-policy-tag {
+    align-items: start;
+    border-top: 1px solid var(--nt-line-subtle);
+    padding-top: var(--nt-pad-3);
+  }
+
+  .chipswap-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+  }
+
   /* ---------- collection, store, trades ---------- */
 
   .chipswap-grid {

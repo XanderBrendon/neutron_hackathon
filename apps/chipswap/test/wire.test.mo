@@ -1,8 +1,11 @@
 import Array "mo:core/Array";
 import Blob "mo:core/Blob";
+import List "mo:core/List";
+import Nat32 "mo:core/Nat32";
 import Nat8 "mo:core/Nat8";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
+import Text "mo:core/Text";
 import IngressWire "../backend/IngressWire";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
@@ -24,15 +27,24 @@ let chip : Wire.Chip = {
     serial = 42;
     title = "Sunrise";
     art;
+    nsfw = true;
     design_revision = 7;
     minted_at_ns = 1_700_000_000_000_000_000;
+};
+
+let requirements : Wire.Requirements = {
+    approval = true;
+    min_colors = ?6;
+    max_coverage = ?40;
+    nsfw = ? #disallowed;
 };
 
 let design : Wire.Design = {
     design_id = 3;
     title = "Sunrise";
     art;
-    trade_mode = #manual;
+    requirements;
+    nsfw = true;
     design_revision = 7;
     published_at_ns = 1_600_000_000_000_000_000;
 };
@@ -71,7 +83,8 @@ let ?decodedCatalog = Wire.decodeCatalogReply(catalogBytes) else Runtime.trap("c
 assert (decodedCatalog.designs.size() == 1);
 assert (decodedCatalog.designs[0].design_id == 3);
 assert (decodedCatalog.designs[0].title == "Sunrise");
-assert (decodedCatalog.designs[0].trade_mode == #manual);
+assert (decodedCatalog.designs[0].requirements == requirements);
+assert (decodedCatalog.designs[0].nsfw);
 assert (decodedCatalog.designs[0].design_revision == 7);
 assert (decodedCatalog.designs[0].published_at_ns == 1_600_000_000_000_000_000);
 assert (decodedCatalog.designs[0].art.palette == art.palette);
@@ -95,6 +108,7 @@ switch (decodedMinted) {
         assert (payload.chip.design_id == 3);
         assert (payload.chip.serial == 42);
         assert (payload.chip.title == "Sunrise");
+        assert (payload.chip.nsfw);
         assert (payload.chip.design_revision == 7);
         assert (payload.chip.minted_at_ns == 1_700_000_000_000_000_000);
         assert (payload.chip.art.pixels == art.pixels);
@@ -168,6 +182,91 @@ switch (announceErr) {
     case (#err(payload)) assert (payload.code == "busy");
     case (_) Runtime.trap("expected err");
 };
+
+// --- A design that asks for nothing ----------------------------------------
+
+// The flags byte carries every requirement that is off, so an unrestricted
+// design costs one byte and still round-trips exactly.
+let openDesign : Wire.Design = {
+    design with
+    requirements = {
+        approval = false;
+        min_colors = null;
+        max_coverage = null;
+        nsfw = null;
+    };
+    nsfw = false;
+};
+let openBytes = Wire.encodeCatalogReply({ designs = [openDesign]; directory = [] });
+let ?decodedOpen = Wire.decodeCatalogReply(openBytes) else Runtime.trap("open catalog");
+assert (decodedOpen.designs[0].requirements == openDesign.requirements);
+assert (not decodedOpen.designs[0].nsfw);
+// Two bytes shorter than the message above: one flags byte with nothing set,
+// where the other carried a colour minimum and a coverage cap as well.
+assert (bytesOf(openBytes).size() + 2 == bytesOf(
+    Wire.encodeCatalogReply({ designs = [design]; directory = [] })
+).size());
+
+// A rule of `#required` encodes and reads back as itself, not as its opposite.
+let requiring = Wire.encodeCatalogReply({
+    designs = [{ design with requirements = { requirements with nsfw = ? #required } }];
+    directory = [];
+});
+let ?decodedRequiring = Wire.decodeCatalogReply(requiring) else Runtime.trap("required catalog");
+assert (decodedRequiring.designs[0].requirements.nsfw == ? #required);
+
+// --- Reading a version 1 peer ----------------------------------------------
+
+// Version 1 knew one mode byte where version 2 carries a requirement set, and
+// knew nothing of the tag. Its messages are still readable, so a peer that has
+// not upgraded can still be listed: its mode becomes the one requirement it
+// stood for, and its designs arrive untagged.
+func v1Catalog(designId : Nat, title : Text, mode : Nat8) : Blob {
+    let bytes = List.empty<Nat8>();
+    func u8(value : Nat) { List.add(bytes, Nat8.fromNat(value % 256)) };
+    func u16(value : Nat) { u8(value / 256); u8(value) };
+    func u32(value : Nat) { u16(value / 65_536); u16(value) };
+    func u64(value : Nat) { u32(value / 4_294_967_296); u32(value) };
+    func str(value : Text) {
+        let encoded = Blob.toArray(Text.encodeUtf8(value));
+        u16(encoded.size());
+        for (byte in encoded.values()) List.add(bytes, byte);
+    };
+    for (byte in Wire.MAGIC.values()) List.add(bytes, byte);
+    List.add(bytes, 1 : Nat8); // catalog
+    List.add(bytes, 1 : Nat8); // wire version 1
+    u16(1); // one design
+    u16(designId);
+    str(title);
+    str(art.shape_id);
+    u16(art.palette.size());
+    for (colour in art.palette.values()) u32(Nat32.toNat(colour));
+    u16(art.pixels.size());
+    for (byte in art.pixels.values()) List.add(bytes, byte);
+    List.add(bytes, mode);
+    u64(7); // design revision
+    u64(1_600_000_000_000_000_000); // published at
+    u16(0); // empty directory
+    Blob.fromArray(List.toArray(bytes));
+};
+
+let ?v1Auto = Wire.decodeCatalogReply(v1Catalog(3, "Old auto", 0))
+else Runtime.trap("version 1 auto");
+assert (v1Auto.designs[0].title == "Old auto");
+assert (not v1Auto.designs[0].requirements.approval);
+assert (v1Auto.designs[0].requirements.min_colors == null);
+assert (v1Auto.designs[0].requirements.max_coverage == null);
+assert (v1Auto.designs[0].requirements.nsfw == null);
+assert (not v1Auto.designs[0].nsfw);
+assert (v1Auto.designs[0].art.pixels == art.pixels);
+
+let ?v1Manual = Wire.decodeCatalogReply(v1Catalog(4, "Old manual", 1))
+else Runtime.trap("version 1 manual");
+assert (v1Manual.designs[0].requirements.approval);
+assert (not v1Manual.designs[0].nsfw);
+
+// A mode byte that was never a mode is refused, in version 1 as in version 2.
+assert (Wire.decodeCatalogReply(v1Catalog(3, "Old", 2)) == null);
 
 // --- Hostile input ---------------------------------------------------------
 

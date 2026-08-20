@@ -100,6 +100,9 @@ export const Trades = ({ onChanged }: Props) => {
                 />
                 <div className="chipswap-trade-meta">
                   <strong>{trade.offered.title}</strong>
+                  {trade.offered.nsfw ? (
+                    <span className="nt-tag nt-tag--warning">NSFW</span>
+                  ) : null}
                   <span className="nt-meta" title={trade.peer}>
                     offered by {trade.contactName ?? shortPrincipal(trade.peer)}
                   </span>

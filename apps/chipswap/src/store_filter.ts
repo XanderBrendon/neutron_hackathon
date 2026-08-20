@@ -1,5 +1,5 @@
-// The three store filter axes from the requirements. The backend applies them so
-// paging stays correct, which means the tile only has to name them.
+// The store filter axes. The backend applies them so `total` stays correct for
+// the filtered set, which means the tile only has to name them.
 
 import type { StoreFilter } from "./api.ts";
 
@@ -15,17 +15,28 @@ export const DESIGNER_OPTIONS = [
   { value: "not_owner_of_designer", label: "Designers I don't own from" },
 ] as const;
 
-export const TRADE_MODE_OPTIONS = [
-  { value: "all", label: "Any trade mode" },
-  { value: "auto", label: "Accepts any trade" },
-  { value: "manual", label: "Designer approves" },
+// "Swaps freely" and "Has requirements" are not opposites: a design may ask for
+// the designer's approval and nothing else, which is neither of them.
+export const POLICY_OPTIONS = [
+  { value: "all", label: "Any trade policy" },
+  { value: "open", label: "Swaps freely" },
+  { value: "approval", label: "Designer approves" },
+  { value: "requirements", label: "Has requirements" },
+] as const;
+
+export const NSFW_OPTIONS = [
+  { value: "hide", label: "Hide NSFW" },
+  { value: "show", label: "Show NSFW" },
 ] as const;
 
 export function defaultFilter(): StoreFilter {
   return {
     ownership: "all",
     designerOwnership: "all",
-    tradeMode: "all",
+    policy: "all",
+    // Tagged chips stay out until they are asked for. The store says how many
+    // it left out, so this is never a silent omission.
+    nsfw: "hide",
   };
 }
 
@@ -33,7 +44,8 @@ export function isDefaultFilter(filter: StoreFilter): boolean {
   return (
     filter.ownership === "all" &&
     filter.designerOwnership === "all" &&
-    filter.tradeMode === "all"
+    filter.policy === "all" &&
+    filter.nsfw === "hide"
   );
 }
 
@@ -41,12 +53,14 @@ export function isDefaultFilter(filter: StoreFilter): boolean {
 export function serializeFilter(filter: StoreFilter): {
   ownership: string;
   designer_ownership: string;
-  trade_mode: string;
+  policy: string;
+  nsfw: string;
 } {
   return {
     ownership: filter.ownership,
     designer_ownership: filter.designerOwnership,
-    trade_mode: filter.tradeMode,
+    policy: filter.policy,
+    nsfw: filter.nsfw,
   };
 }
 
@@ -59,11 +73,11 @@ export function filterLabel(filter: StoreFilter): string {
   const designer = DESIGNER_OPTIONS.find(
     (option) => option.value === filter.designerOwnership,
   );
-  const mode = TRADE_MODE_OPTIONS.find(
-    (option) => option.value === filter.tradeMode,
-  );
+  const policy = POLICY_OPTIONS.find((option) => option.value === filter.policy);
   if (filter.ownership !== "all" && ownership) parts.push(ownership.label);
   if (filter.designerOwnership !== "all" && designer) parts.push(designer.label);
-  if (filter.tradeMode !== "all" && mode) parts.push(mode.label);
+  if (filter.policy !== "all" && policy) parts.push(policy.label);
+  // Only the unusual choice is worth naming: hiding tagged chips is the default.
+  if (filter.nsfw === "show") parts.push("NSFW shown");
   return parts.join(" · ");
 }

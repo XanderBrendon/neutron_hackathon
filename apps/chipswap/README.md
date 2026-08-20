@@ -12,14 +12,35 @@ whole ten-design catalog crosses the network in about 10 KB.
 
 **Ten slots.** A draft occupies one of ten design slots. Deleting a draft frees
 its slot; publishing consumes the slot permanently and freezes the artwork.
-Only the trade mode stays changeable afterwards, because that is policy rather
-than art.
+Only the trade requirements and the NSFW tag stay changeable afterwards,
+because those are policy and a label rather than art.
 
 **Trading.** Offering one of your own published designs mints a fresh instance
 and costs you nothing. Offering a chip you acquired from someone else consumes
-it — you no longer own it and would have to trade for it again. A design set to
-*accept any trade* completes in a single call; a design set to *designer
-approves* holds the offered chip in escrow until you accept or decline.
+it — you no longer own it and would have to trade for it again.
+
+**Trade requirements.** A design may ask something of the chip offered for it:
+a minimum number of colours, a cap on how much of it any one colour covers, and
+whether the offered chip may or must carry the NSFW tag. An offer that fails a
+requirement is declined outright. A fourth requirement, *designer approves*,
+does not refuse anything — it holds a qualifying offer in escrow until you
+accept or decline it. All four are optional, and a design that asks for nothing
+swaps freely in a single call.
+
+Requirements are measured on the receiving side, over the offered art itself,
+so a peer cannot assert that its chip has twelve colours: it hands over the
+pixels and they are counted. Colours are counted over the pixels rather than
+the palette, so padding a palette with swatches nothing paints satisfies
+nothing. The tag is the exception — it can only ever be the offering
+canister's word about its own art, in the same way the title is. The store runs
+the same arithmetic against your own chips before you offer one, so an offer
+that would bounce is greyed out with the reason on it rather than costing a
+paid call to find out.
+
+**The NSFW tag.** A design may be tagged, and every chip minted from it carries
+the tag it was minted with — retagging a design never relabels a chip already
+in someone's collection. Tagged chips are left out of the store until you ask
+for them, and the store says how many it left out.
 
 **Stamping a picture.** A picture chosen from a file or pasted from the
 clipboard is placed under the chip, dragged and scaled against a live preview,
@@ -43,7 +64,7 @@ Contacts entries carrying a Neutron address can be added directly.
 
 **Store.** The store reads a bounded cache of the catalogs you have fetched, so
 it opens instantly and refreshes explicitly. It filters by ownership, by
-designer ownership, and by trade mode.
+designer ownership, by trade policy, and by the NSFW tag.
 
 ## The chipswap_v1 protocol
 
@@ -64,6 +85,12 @@ code runs. Replies are a `Blob` carrying the compact `CSW1` wire, which the
 caller parses with bounded byte arithmetic — hostile reply bytes never reach
 `from_candid`, which traps.
 
+The wire is at version 2, which added trade requirements to a catalog entry and
+the NSFW tag to a chip. Version 1 replies still decode — their trade mode
+becomes the one requirement it stood for, and their chips arrive untagged — but
+we only ever write version 2, which a version 1 peer refuses outright rather
+than misreading.
+
 Outbound authority is one `method`-scoped reservation for that dispatcher name,
 granted at install. It cannot call any other method on any canister, and it
 needs no per-designer approval, which is what makes trading with strangers
@@ -82,7 +109,7 @@ remains.
 ```sh
 cd apps/chipswap
 npm test              # package + bun tests + Motoko tests
-npm run package       # writes chipswap.v0.1.0.neutron
+npm run package       # writes chipswap.v0.1.5.neutron
 npm run test:motoko   # Motoko unit tests only
 ```
 
@@ -105,6 +132,7 @@ backend/
   Designs.mo        the ten slots: draft, save, publish, mint
   Holdings.mo       chips held, escrowed, or uncertain
   Directory.mo      designers, catalog cache, store filtering
+  Requirements.mo   measuring an offer against a design's requirements
   Trades.mo         the trade state machine
   Wire.mo           the CSW1 peer reply format
   IngressWire.mo    non-trapping Candid unwrapping
@@ -119,6 +147,7 @@ src/
   image_stamp.ts    sampling a picture down to 757 pixels
   image_source.ts   files and clipboard pictures into a raster
   editor_state.ts   pure editor reducers with undo and locks
+  requirements.ts   what a design asks of an offered chip
   api.ts            typed self calls and payload parsers
   views/            studio, collection, store, trades, directory
 ```

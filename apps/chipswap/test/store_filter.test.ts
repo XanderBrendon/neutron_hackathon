@@ -1,25 +1,28 @@
 import { expect, test } from "bun:test";
 import {
   DESIGNER_OPTIONS,
+  NSFW_OPTIONS,
   OWNERSHIP_OPTIONS,
-  TRADE_MODE_OPTIONS,
+  POLICY_OPTIONS,
   defaultFilter,
   filterLabel,
   isDefaultFilter,
   serializeFilter,
 } from "../src/store_filter.ts";
 
-test("the store opens unfiltered", () => {
+test("the store opens unfiltered, except that tagged chips wait to be asked for", () => {
   const filter = defaultFilter();
   expect(filter).toEqual({
     ownership: "all",
     designerOwnership: "all",
-    tradeMode: "all",
+    policy: "all",
+    nsfw: "hide",
   });
   expect(isDefaultFilter(filter)).toBe(true);
+  expect(isDefaultFilter({ ...filter, nsfw: "show" })).toBe(false);
 });
 
-test("the three axes offer exactly the documented choices", () => {
+test("the four axes offer exactly the documented choices", () => {
   expect(OWNERSHIP_OPTIONS.map((option) => option.value)).toEqual([
     "all",
     "owned",
@@ -30,11 +33,13 @@ test("the three axes offer exactly the documented choices", () => {
     "owner_of_designer",
     "not_owner_of_designer",
   ]);
-  expect(TRADE_MODE_OPTIONS.map((option) => option.value)).toEqual([
+  expect(POLICY_OPTIONS.map((option) => option.value)).toEqual([
     "all",
-    "auto",
-    "manual",
+    "open",
+    "approval",
+    "requirements",
   ]);
+  expect(NSFW_OPTIONS.map((option) => option.value)).toEqual(["hide", "show"]);
 });
 
 test("serialisation uses the backend field names", () => {
@@ -42,17 +47,20 @@ test("serialisation uses the backend field names", () => {
     serializeFilter({
       ownership: "owned",
       designerOwnership: "not_owner_of_designer",
-      tradeMode: "manual",
+      policy: "requirements",
+      nsfw: "show",
     }),
   ).toEqual({
     ownership: "owned",
     designer_ownership: "not_owner_of_designer",
-    trade_mode: "manual",
+    policy: "requirements",
+    nsfw: "show",
   });
   expect(Object.keys(serializeFilter(defaultFilter()))).toEqual([
     "ownership",
     "designer_ownership",
-    "trade_mode",
+    "policy",
+    "nsfw",
   ]);
 });
 
@@ -62,7 +70,18 @@ test("the label names only the axes that are narrowing the view", () => {
     filterLabel({
       ownership: "not_owned",
       designerOwnership: "all",
-      tradeMode: "auto",
+      policy: "open",
+      nsfw: "hide",
     }),
-  ).toBe("Chips I don't own · Accepts any trade");
+  ).toBe("Chips I don't own · Swaps freely");
+  // Showing tagged chips widens the view rather than narrowing it, so it is the
+  // one setting worth naming when it is not the default.
+  expect(
+    filterLabel({
+      ownership: "all",
+      designerOwnership: "all",
+      policy: "all",
+      nsfw: "show",
+    }),
+  ).toBe("NSFW shown");
 });
