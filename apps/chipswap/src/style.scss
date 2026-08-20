@@ -251,6 +251,12 @@
     padding-top: var(--nt-pad-3);
   }
 
+  /* Each end of the blend wears the colour it stands for, so it needs an edge
+     of its own: the design system's underline vanishes against a dark swatch. */
+  .chipswap-blend-select {
+    box-shadow: inset 0 0 0 1px var(--nt-line-strong);
+  }
+
   .chipswap-brushes {
     display: flex;
     flex-wrap: wrap;

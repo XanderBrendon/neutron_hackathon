@@ -48,6 +48,12 @@ import { MAX_PALETTE, blendColors, contrastColor } from "../palette.ts";
 
 type Tool = "paint" | "lock" | "unlock";
 
+/** Paints a control in the colour it stands for, with a legible label on top. */
+const swatchStyle = (colour: string) => ({
+  background: colour,
+  color: contrastColor(colour),
+});
+
 type Props = {
   status: Status | null;
   onChanged: () => void | Promise<void>;
@@ -85,6 +91,11 @@ export const Studio = ({ status, onChanged }: Props) => {
   const editable = selected?.state === "draft";
   // A full palette can take no more colours, so the flyout has nothing to offer.
   const full = (editor?.palette.length ?? 0) >= MAX_PALETTE;
+  // The blend ends fall back to black and white so the flyout still renders
+  // while a design is loading and the palette is not there yet.
+  const blendSource = editor?.palette[blendFrom] ?? "#000000";
+  const blendTarget = editor?.palette[blendTo] ?? "#ffffff";
+  const blended = blendColors(blendSource, blendTarget, blendRatio);
 
   const reload = useCallback(async () => {
     try {
@@ -588,7 +599,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                     })}
                     key={`${colour}-${index}`}
                     onClick={() => setEditor(selectColor(editor, index))}
-                    style={{ background: colour, color: contrastColor(colour) }}
+                    style={swatchStyle(colour)}
                     title={colour}
                     type="button"
                   >
@@ -629,7 +640,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                       className="nt-button nt-button--sm"
                       disabled={full}
                       onClick={() => setEditor(addPaletteColor(editor, newColor))}
-                      style={{ background: newColor, color: contrastColor(newColor) }}
+                      style={swatchStyle(newColor)}
                       type="button"
                     >
                       Add {newColor}
@@ -640,12 +651,13 @@ export const Studio = ({ status, onChanged }: Props) => {
                     <label className="nt-field">
                       <span className="nt-label">From</span>
                       <select
-                        className="nt-select"
+                        className="nt-select chipswap-blend-select"
                         onChange={(event) => setBlendFrom(Number(event.currentTarget.value))}
+                        style={swatchStyle(blendSource)}
                         value={blendFrom}
                       >
                         {editor.palette.map((colour, index) => (
-                          <option key={index} value={index}>
+                          <option key={index} style={swatchStyle(colour)} value={index}>
                             {index}: {colour}
                           </option>
                         ))}
@@ -654,12 +666,13 @@ export const Studio = ({ status, onChanged }: Props) => {
                     <label className="nt-field">
                       <span className="nt-label">To</span>
                       <select
-                        className="nt-select"
+                        className="nt-select chipswap-blend-select"
                         onChange={(event) => setBlendTo(Number(event.currentTarget.value))}
+                        style={swatchStyle(blendTarget)}
                         value={blendTo}
                       >
                         {editor.palette.map((colour, index) => (
-                          <option key={index} value={index}>
+                          <option key={index} style={swatchStyle(colour)} value={index}>
                             {index}: {colour}
                           </option>
                         ))}
@@ -679,22 +692,15 @@ export const Studio = ({ status, onChanged }: Props) => {
                         value={blendRatio}
                       />
                     </label>
-                    {(() => {
-                      const from = editor.palette[blendFrom] ?? "#000000";
-                      const to = editor.palette[blendTo] ?? "#ffffff";
-                      const blended = blendColors(from, to, blendRatio);
-                      return (
-                        <button
-                          className="nt-button nt-button--sm"
-                          disabled={full}
-                          onClick={() => setEditor(addPaletteColor(editor, blended))}
-                          style={{ background: blended, color: contrastColor(blended) }}
-                          type="button"
-                        >
-                          Add {blended}
-                        </button>
-                      );
-                    })()}
+                    <button
+                      className="nt-button nt-button--sm"
+                      disabled={full}
+                      onClick={() => setEditor(addPaletteColor(editor, blended))}
+                      style={swatchStyle(blended)}
+                      type="button"
+                    >
+                      Add {blended}
+                    </button>
                   </div>
                 </div>
               ) : null}
@@ -909,7 +915,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                             : [...current, index],
                         )
                       }
-                      style={{ background: colour, color: contrastColor(colour) }}
+                      style={swatchStyle(colour)}
                       type="button"
                     >
                       {position >= 0 ? position + 1 : ""}
