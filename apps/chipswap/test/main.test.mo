@@ -182,7 +182,7 @@ let offered : Chipswap.PeerChip = {
             Array.tabulate<Nat8>(Shape.PIXEL_COUNT, func(i) { Nat8.fromNat(i % 2) })
         );
     };
-    nsfw = null;
+    nsfw = false;
     design_revision = 1;
     minted_at_ns = 5;
 };

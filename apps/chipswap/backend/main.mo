@@ -367,16 +367,13 @@ module {
         pixels : Blob;
     };
 
-    // `nsfw` is optional so a peer built against the first protocol can still
-    // send us a chip: an absent tag is an untagged chip, which is what a peer
-    // that has never heard of the tag is offering.
     public type PeerChip = {
         designer : Principal;
         design_id : Nat;
         serial : Nat;
         title : Text;
         art : PeerArt;
-        nsfw : ?Bool;
+        nsfw : Bool;
         design_revision : Nat;
         minted_at_ns : Int;
     };
@@ -1117,7 +1114,7 @@ module {
             let payload : PeerTradeRequest = {
                 request_id = proposal.request_id;
                 want_design_id = proposal.want_design_id;
-                offered = chipToPeer(proposal.offered);
+                offered = proposal.offered;
                 directory = Directory.share(mem, self, Directory.MAX_SHARE);
             };
             let reply = await* callRoute(
@@ -1260,7 +1257,7 @@ module {
                 {
                     request_id = request.request_id;
                     want_design_id = request.want_design_id;
-                    offered = chipFromPeer(request.offered);
+                    offered = request.offered;
                     directory = request.directory;
                 },
                 caller,
@@ -1277,8 +1274,8 @@ module {
         ) : Blob {
             let now = Time.now();
             let outcome : Trades.DeliverOutcome = switch (request.outcome) {
-                case (#minted(chip)) #minted(chipFromPeer(chip));
-                case (#returned(chip)) #returned(chipFromPeer(chip));
+                case (#minted(chip)) #minted(chip);
+                case (#returned(chip)) #returned(chip);
                 case (#declined) #declined;
             };
             ignore Directory.merge(mem, request.directory, self, now);
@@ -1319,8 +1316,8 @@ module {
 
         func deliver(delivery : Trades.Delivery, requestIdText : Text) : async* TradeActionResult {
             let outcome : PeerDeliverOutcome = switch (delivery.outcome) {
-                case (#minted(chip)) #minted(chipToPeer(chip));
-                case (#returned(chip)) #returned(chipToPeer(chip));
+                case (#minted(chip)) #minted(chip);
+                case (#returned(chip)) #returned(chip);
                 case (#declined) #declined;
             };
             let payload : PeerDeliverRequest = {
@@ -1554,35 +1551,6 @@ module {
                 case (?#required) ? #required;
                 case null null;
             };
-        };
-    };
-
-    // A chip from a peer that has never heard of the tag is untagged, not
-    // assumed safe by omission in some other sense: an untagged chip is exactly
-    // what a design with no tag mints.
-    func chipFromPeer(chip : PeerChip) : Wire.Chip {
-        {
-            designer = chip.designer;
-            design_id = chip.design_id;
-            serial = chip.serial;
-            title = chip.title;
-            art = chip.art;
-            nsfw = switch (chip.nsfw) { case (?value) value; case null false };
-            design_revision = chip.design_revision;
-            minted_at_ns = chip.minted_at_ns;
-        };
-    };
-
-    func chipToPeer(chip : Wire.Chip) : PeerChip {
-        {
-            designer = chip.designer;
-            design_id = chip.design_id;
-            serial = chip.serial;
-            title = chip.title;
-            art = chip.art;
-            nsfw = ?chip.nsfw;
-            design_revision = chip.design_revision;
-            minted_at_ns = chip.minted_at_ns;
         };
     };
 

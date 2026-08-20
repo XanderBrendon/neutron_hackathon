@@ -20,15 +20,14 @@ import Shape "./Shape";
 // allocation; and a decoder rejects trailing bytes so two different byte strings
 // can never mean the same message.
 //
-// Version 2 carries trade requirements and the NSFW tag. Version 1 knew only a
-// two-valued trade mode, so it is still readable: its mode is the one
-// requirement it stood for, and its chips are untagged. We only ever write
-// version 2 — a version 1 peer will refuse that outright, which is the point of
-// putting a version in every message.
+// One version is current and it is the only one read or written. The version
+// byte stays 2 because version 1 described a different layout for the same
+// message types, and letting the two share a number is the one thing the byte
+// exists to prevent: a message in the older layout is refused rather than
+// misread.
 module {
     public let MAGIC : [Nat8] = [0x43, 0x53, 0x57, 0x31]; // CSW1
     public let WIRE_VERSION : Nat8 = 2;
-    public let MIN_WIRE_VERSION : Nat8 = 1;
     public let MAX_MESSAGE_BYTES : Nat = 65_536;
 
     public let MAX_DESIGNS : Nat = 10;
@@ -419,12 +418,9 @@ module {
     // Every read is bounds-checked. A failed read latches `failed`, so a caller
     // may read a whole message and check validity once, and a length that was
     // never really read is zero rather than attacker-chosen.
-    class Reader(bytes : [Nat8], wire : Nat8) {
+    class Reader(bytes : [Nat8]) {
         var offset = 0;
         var failed = false;
-
-        /** The version in the header, so a record can be read as it was sent. */
-        public func version() : Nat8 = wire;
 
         public func ok() : Bool = not failed;
 
@@ -529,9 +525,8 @@ module {
             index += 1;
         };
         if (bytes[MAGIC.size()] != expected) return null;
-        let version = bytes[MAGIC.size() + 1];
-        if (version < MIN_WIRE_VERSION or version > WIRE_VERSION) return null;
-        let reader = Reader(bytes, version);
+        if (bytes[MAGIC.size() + 1] != WIRE_VERSION) return null;
+        let reader = Reader(bytes);
         ignore reader.raw(MAGIC.size() + 2);
         ?reader;
     };
@@ -571,8 +566,6 @@ module {
         ?{ shape_id = shapeId; palette; pixels };
     };
 
-    // Version 1 had no tag, so a chip from a version 1 peer is untagged rather
-    // than assumed either way.
     func readChip(reader : Reader) : ?Chip {
         let designer = reader.principal();
         let designId = reader.u16();
@@ -580,7 +573,7 @@ module {
         let title = reader.text(MAX_TITLE_BYTES);
         if (not reader.ok()) return null;
         let ?art = readArt(reader) else return null;
-        let nsfw = if (reader.version() >= 2) reader.flag() else false;
+        let nsfw = reader.flag();
         let designRevision = reader.u64();
         let mintedAt = reader.u64();
         if (not reader.ok()) return null;
@@ -629,32 +622,13 @@ module {
 
     func has(flags : Nat, bit : Nat) : Bool = (flags / bit) % 2 == 1;
 
-    // Version 1 carried one mode byte where version 2 carries a requirement
-    // set. The mode is exactly the requirement it stood for.
     func readDesign(reader : Reader) : ?Design {
         let designId = reader.u16();
         let title = reader.text(MAX_TITLE_BYTES);
         if (not reader.ok()) return null;
         let ?art = readArt(reader) else return null;
-        let (requirements, nsfw) = if (reader.version() >= 2) {
-            let ?parsed = readRequirements(reader) else return null;
-            (parsed, reader.flag());
-        } else {
-            let approval = switch (reader.u8()) {
-                case (0) false;
-                case (1) true;
-                case (_) return null;
-            };
-            (
-                {
-                    approval;
-                    min_colors = null;
-                    max_coverage = null;
-                    nsfw = null;
-                } : Requirements,
-                false,
-            );
-        };
+        let ?requirements = readRequirements(reader) else return null;
+        let nsfw = reader.flag();
         let designRevision = reader.u64();
         let publishedAt = reader.u64();
         if (not reader.ok()) return null;

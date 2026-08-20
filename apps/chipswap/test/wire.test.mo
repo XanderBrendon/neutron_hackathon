@@ -1,11 +1,8 @@
 import Array "mo:core/Array";
 import Blob "mo:core/Blob";
-import List "mo:core/List";
-import Nat32 "mo:core/Nat32";
 import Nat8 "mo:core/Nat8";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
-import Text "mo:core/Text";
 import IngressWire "../backend/IngressWire";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
@@ -215,59 +212,6 @@ let requiring = Wire.encodeCatalogReply({
 let ?decodedRequiring = Wire.decodeCatalogReply(requiring) else Runtime.trap("required catalog");
 assert (decodedRequiring.designs[0].requirements.nsfw == ? #required);
 
-// --- Reading a version 1 peer ----------------------------------------------
-
-// Version 1 knew one mode byte where version 2 carries a requirement set, and
-// knew nothing of the tag. Its messages are still readable, so a peer that has
-// not upgraded can still be listed: its mode becomes the one requirement it
-// stood for, and its designs arrive untagged.
-func v1Catalog(designId : Nat, title : Text, mode : Nat8) : Blob {
-    let bytes = List.empty<Nat8>();
-    func u8(value : Nat) { List.add(bytes, Nat8.fromNat(value % 256)) };
-    func u16(value : Nat) { u8(value / 256); u8(value) };
-    func u32(value : Nat) { u16(value / 65_536); u16(value) };
-    func u64(value : Nat) { u32(value / 4_294_967_296); u32(value) };
-    func str(value : Text) {
-        let encoded = Blob.toArray(Text.encodeUtf8(value));
-        u16(encoded.size());
-        for (byte in encoded.values()) List.add(bytes, byte);
-    };
-    for (byte in Wire.MAGIC.values()) List.add(bytes, byte);
-    List.add(bytes, 1 : Nat8); // catalog
-    List.add(bytes, 1 : Nat8); // wire version 1
-    u16(1); // one design
-    u16(designId);
-    str(title);
-    str(art.shape_id);
-    u16(art.palette.size());
-    for (colour in art.palette.values()) u32(Nat32.toNat(colour));
-    u16(art.pixels.size());
-    for (byte in art.pixels.values()) List.add(bytes, byte);
-    List.add(bytes, mode);
-    u64(7); // design revision
-    u64(1_600_000_000_000_000_000); // published at
-    u16(0); // empty directory
-    Blob.fromArray(List.toArray(bytes));
-};
-
-let ?v1Auto = Wire.decodeCatalogReply(v1Catalog(3, "Old auto", 0))
-else Runtime.trap("version 1 auto");
-assert (v1Auto.designs[0].title == "Old auto");
-assert (not v1Auto.designs[0].requirements.approval);
-assert (v1Auto.designs[0].requirements.min_colors == null);
-assert (v1Auto.designs[0].requirements.max_coverage == null);
-assert (v1Auto.designs[0].requirements.nsfw == null);
-assert (not v1Auto.designs[0].nsfw);
-assert (v1Auto.designs[0].art.pixels == art.pixels);
-
-let ?v1Manual = Wire.decodeCatalogReply(v1Catalog(4, "Old manual", 1))
-else Runtime.trap("version 1 manual");
-assert (v1Manual.designs[0].requirements.approval);
-assert (not v1Manual.designs[0].nsfw);
-
-// A mode byte that was never a mode is refused, in version 1 as in version 2.
-assert (Wire.decodeCatalogReply(v1Catalog(3, "Old", 2)) == null);
-
 // --- Hostile input ---------------------------------------------------------
 
 // Empty, short, wrong magic, wrong version, unknown type.
@@ -276,6 +220,11 @@ assert (Wire.decodeCatalogReply(Blob.fromArray([0x43, 0x53, 0x57])) == null);
 assert (Wire.decodeCatalogReply(withByte(catalogBytes, 0, 0x44)) == null);
 assert (Wire.decodeCatalogReply(withByte(catalogBytes, 5, 9)) == null);
 assert (Wire.decodeCatalogReply(withByte(catalogBytes, 4, 9)) == null);
+// One version is current. The older layout described the same message types
+// differently, so a message claiming it is refused rather than read as this one.
+assert (Wire.decodeCatalogReply(withByte(catalogBytes, 5, 1)) == null);
+assert (Wire.decodeTradeReply(withByte(mintedBytes, 5, 1)) == null);
+assert (Wire.decodeCatalogReply(withByte(catalogBytes, 5, 0)) == null);
 
 // A reply of one type never decodes as another.
 assert (Wire.decodeTradeReply(catalogBytes) == null);

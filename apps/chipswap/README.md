@@ -86,10 +86,9 @@ caller parses with bounded byte arithmetic — hostile reply bytes never reach
 `from_candid`, which traps.
 
 The wire is at version 2, which added trade requirements to a catalog entry and
-the NSFW tag to a chip. Version 1 replies still decode — their trade mode
-becomes the one requirement it stood for, and their chips arrive untagged — but
-we only ever write version 2, which a version 1 peer refuses outright rather
-than misreading.
+the NSFW tag to a chip. It is the only version read or written: an earlier
+version 1 described the same message types differently, so a reply claiming it
+is refused rather than misread, which is what the version byte is for.
 
 Outbound authority is one `method`-scoped reservation for that dispatcher name,
 granted at install. It cannot call any other method on any canister, and it
@@ -109,7 +108,7 @@ remains.
 ```sh
 cd apps/chipswap
 npm test              # package + bun tests + Motoko tests
-npm run package       # writes chipswap.v0.1.5.neutron
+npm run package       # writes chipswap.v0.1.6.neutron
 npm run test:motoko   # Motoko unit tests only
 ```
 
