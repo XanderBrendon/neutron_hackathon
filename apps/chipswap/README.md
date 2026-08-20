@@ -32,15 +32,15 @@ so a peer cannot assert that its chip has twelve colors: it hands over the
 pixels and they are counted. Colors are counted over the pixels rather than
 the palette, so padding a palette with swatches nothing paints satisfies
 nothing. The tag is the exception — it can only ever be the offering
-canister's word about its own art, in the same way the title is. The store runs
-the same arithmetic against your own chips before you offer one, so an offer
-that would bounce is grayed out with the reason on it rather than costing a
-paid call to find out.
+canister's word about its own art, in the same way the title is. The Market
+runs the same arithmetic against your own chips before you offer one, so an
+offer that would bounce is grayed out with the reason on it rather than costing
+a paid call to find out.
 
 **The NSFW tag.** A design may be tagged, and every chip minted from it carries
 the tag it was minted with — retagging a design never relabels a chip already
-in someone's collection. Tagged chips are left out of the store until you ask
-for them, and the store says how many it left out.
+in someone's collection. Tagged chips are left out of the Market until you ask
+for them, and the Market says how many it left out.
 
 **Stamping a picture.** A picture chosen from a file or pasted from the
 clipboard is placed under the chip, dragged and scaled against a live preview,
@@ -73,7 +73,7 @@ looking.
 **Ignoring a designer.** Ignoring is not forgetting. A forgotten designer comes
 straight back the next time a crawl finds them, with no memory of having been
 turned away; an ignored one stays in your list saying so. While a designer is
-ignored their catalog is never fetched, their cached designs leave the store,
+ignored their catalog is never fetched, their cached designs leave the Market,
 and you stop handing their address to peers who crawl you. Un-ignoring restores
 the entry, not the catalog: nothing of theirs reappears until the next refresh
 actually fetches something.
@@ -89,9 +89,27 @@ trade proposal from a retired designer disproves the conclusion and clears it,
 and the owner can clear or set it by hand. Chips you already hold from them stay
 yours — a chip is copied to you when the trade completes, not fetched later.
 
-**Store.** The store reads a bounded cache of the catalogs you have fetched, so
-it opens instantly and refreshes explicitly. It filters by ownership, by
-designer ownership, by trade policy, and by the NSFW tag.
+**Market.** The Market reads a bounded cache of the catalogs you have fetched,
+so it opens instantly and refreshes explicitly.
+
+Two choices sit above the filters because they are standing ones: *Show NSFW*,
+which is off until you turn it on, and *Refresh catalogs*. Everything else is
+in a collapsed **Filters** section — a title search, a designer, a sort order,
+*Hide chips I already own* (on by default, because the Collection is where
+those belong), and the trade requirements.
+
+The requirement boxes widen each other rather than narrowing: ticking two shows
+the designs matching either. *Trades I can make* is the one that reads your own
+side of the swap — it measures every chip you hold and every design you have
+published against each listing's requirements, and keeps the listings at least
+one of them satisfies. It counts a design that asks for the designer's approval,
+because approval decides what becomes of an offer that already qualifies rather
+than whether it qualifies; it does not count a draft, which cannot be offered,
+or a chip already escrowed in a trade in flight.
+
+Filtering, sorting and paging all happen in the backend, so the count the header
+gives is the count for the filter you asked for rather than for the page you can
+see.
 
 ## The chipswap_v1 protocol
 
@@ -161,7 +179,7 @@ backend/
   Shape.mo          chip geometry and art validation
   Designs.mo        the ten slots: draft, save, publish, mint
   Holdings.mo       chips held, escrowed, or uncertain
-  Directory.mo      designers, the crawl, catalog cache, store filtering
+  Directory.mo      designers, the crawl, catalog cache, market filtering
   Requirements.mo   measuring an offer against a design's requirements
   Trades.mo         the trade state machine
   Wire.mo           the CSW1 peer reply format
@@ -178,8 +196,9 @@ src/
   image_source.ts   files and clipboard pictures into a raster
   editor_state.ts   pure editor reducers with undo and locks
   requirements.ts   what a design asks of an offered chip
+  market_filter.ts  the market's filter axes and how they are named
   api.ts            typed self calls and payload parsers
-  views/            studio, collection, store, trades, directory
+  views/            studio, collection, market, trades, directory
 ```
 
 ## Not implemented

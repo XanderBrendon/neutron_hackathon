@@ -2,6 +2,7 @@ import { expect, test } from "bun:test";
 import {
   REQUIREMENT_FACETS,
   SORT_OPTIONS,
+  MAX_SEARCH_CHARS,
   defaultFilter,
   filterLabel,
   isDefaultFilter,
@@ -124,4 +125,14 @@ test("the label names only the axes that are narrowing the view", () => {
 
 test("no designer picked asks the backend about every designer", () => {
   expect(serializeFilter(defaultFilter()).designer).toBe("");
+});
+
+// The backend refuses a search past its ceiling rather than truncating it, and
+// an empty market is a worse answer than a shorter search, so the ceiling is
+// applied here too.
+test("a search past the backend ceiling is cut to it rather than refused", () => {
+  const long = "a".repeat(MAX_SEARCH_CHARS + 10);
+  expect(serializeFilter({ ...defaultFilter(), search: long }).search).toHaveLength(
+    MAX_SEARCH_CHARS,
+  );
 });

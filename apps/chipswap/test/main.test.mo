@@ -354,16 +354,30 @@ switch (
 };
 assert (chipswap.chipswap_directory({ offset = 0; limit = 10 }).entries[0].ignored == false);
 
-// The store reads the cache, so it is empty until a catalog is fetched.
-let store = chipswap.chipswap_store({
-    ownership = "all";
-    designer_ownership = "all";
-    policy = "all";
-    nsfw = "hide";
-    offset = 0;
-    limit = 20;
-});
-assert (store.total == 0);
+// The market reads the cache, so it is empty until a catalog is fetched.
+func marketPage(designer : Text, sort : Text) : Chipswap.StorePage {
+    chipswap.chipswap_store({
+        ownership = "not_owned";
+        nsfw = "hide";
+        requirements = ["open", "tradeable"];
+        designer;
+        search = "moon";
+        sort;
+        offset = 0;
+        limit = 20;
+    });
+};
+
+assert (marketPage("", "recent").total == 0);
+
+// A designer nobody picked is an empty string, and it must not be read as a
+// principal that failed to parse: those are different answers.
+assert (marketPage("aaaaa-aa", "recent").total == 0);
+
+// Text that is not a principal is refused rather than trapping the query. The
+// tile never sends this, but a query is reachable and must not fall over.
+assert (marketPage("not-a-principal", "recent").total == 0);
+assert (marketPage("", "nope").total == 0);
 
 // Brushes persist with validated geometry.
 switch (

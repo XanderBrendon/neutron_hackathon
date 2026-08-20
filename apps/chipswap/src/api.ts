@@ -9,8 +9,10 @@ import { querySelf, updateSelf, type JsonValue } from "neutron-tools/app";
 import { PIXEL_COUNT } from "./chip.ts";
 import { isHexColor } from "./palette.ts";
 import type { NsfwRule, TradeRequirements } from "./requirements.ts";
+import { serializeFilter } from "./market_filter.ts";
+import type { MarketFilter } from "./market_filter.ts";
 
-export type { NsfwRule, TradeRequirements };
+export type { NsfwRule, TradeRequirements, MarketFilter };
 
 export class ChipswapError extends Error {
   readonly code: string;
@@ -117,7 +119,6 @@ export type StoreRow = {
   nsfw: boolean;
   designRevision: number;
   owned: boolean;
-  ownsDesigner: boolean;
   fetchedAtNs: string;
   contactName: string | null;
 };
@@ -170,14 +171,6 @@ export type Suggestion = {
   contactName: string;
   principal: string;
   inDirectory: boolean;
-};
-
-export type StoreFilter = {
-  ownership: "all" | "owned" | "not_owned";
-  designerOwnership: "all" | "owner_of_designer" | "not_owner_of_designer";
-  policy: "all" | "open" | "approval" | "requirements";
-  /** Tagged chips are left out until they are asked for. */
-  nsfw: "hide" | "show";
 };
 
 export type TradeOutcome = {
@@ -420,7 +413,6 @@ export function parseStoreRow(value: unknown): StoreRow {
     nsfw: bool(source.nsfw, "NSFW tag"),
     designRevision: natNumber(source.design_revision, "design revision"),
     owned: bool(source.owned, "owned flag"),
-    ownsDesigner: bool(source.owns_designer, "designer ownership flag"),
     fetchedAtNs: nsText(source.fetched_at_ns, "fetch time"),
     contactName: optionalText(source.contact_name, "contact name"),
   };
@@ -567,23 +559,22 @@ export async function loadDirectory(
   };
 }
 
+// Named for `chipswap_store`, the backend method it wraps. The page it reads is
+// the Market, and the backend route keeps the older name.
 export async function loadStore(
-  filter: StoreFilter,
+  filter: MarketFilter,
   offset: number,
   limit: number,
 ): Promise<{ rows: StoreRow[]; total: number; nsfwHidden: number }> {
   const value = record(
     await querySelf("chipswap_store", [
       {
-        ownership: filter.ownership,
-        designer_ownership: filter.designerOwnership,
-        policy: filter.policy,
-        nsfw: filter.nsfw,
+        ...serializeFilter(filter),
         offset: String(offset),
         limit: String(limit),
       },
     ] as unknown as JsonValue[]),
-    "store page",
+    "market page",
   );
   return {
     rows: list(value.rows, "store rows").map(parseStoreRow),

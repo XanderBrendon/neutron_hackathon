@@ -6,6 +6,14 @@
 // the tag axis. Both are written out in `serializeFilter` rather than at the
 // call site so there is one place that knows the translation.
 
+/**
+ * The longest search the backend will answer. This is the tile's copy of
+ * `MAX_SEARCH_CHARS` in `backend/Directory.mo`, which refuses a longer one
+ * outright; a shorter search is a better answer than an empty market, so it is
+ * cut to fit here rather than sent to be refused.
+ */
+export const MAX_SEARCH_CHARS = 64;
+
 export type RequirementFacet =
   /** Something I hold or publish already satisfies this design's requirements. */
   | "tradeable"
@@ -108,7 +116,7 @@ export function serializeFilter(filter: MarketFilter): {
     // An empty string is the backend's "no constraint" for both of these: a
     // designer nobody picked and a search nobody typed.
     designer: filter.designer ?? "",
-    search: filter.search.trim(),
+    search: filter.search.trim().slice(0, MAX_SEARCH_CHARS),
     sort: filter.sort,
   };
 }

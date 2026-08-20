@@ -202,7 +202,6 @@ module {
         nsfw : Bool;
         design_revision : Nat;
         owned : Bool;
-        owns_designer : Bool;
         fetched_at_ns : Int;
         contact_name : ?Text;
     };
@@ -339,11 +338,16 @@ module {
 
     public type RetireRequest = { canister : Text; retired : Bool };
 
+    // `designer` is a principal as text, and empty means every designer. It
+    // crosses as text rather than a principal because the tile reads it out of
+    // a select whose empty option is a string like every other option.
     public type StoreRequest = {
         ownership : Text;
-        designer_ownership : Text;
-        policy : Text;
         nsfw : Text;
+        requirements : [Text];
+        designer : Text;
+        search : Text;
+        sort : Text;
         offset : Nat;
         limit : Nat;
     };
@@ -556,15 +560,26 @@ module {
         };
 
         public func /*query*/chipswap_store(request : StoreRequest) : StorePage {
+            let empty = { rows = []; total = 0; nsfw_hidden = 0 };
+            // No designer picked is an empty string. Anything else has to be a
+            // principal we can compare against, so text that is not one narrows
+            // the market to nothing rather than quietly widening it to
+            // everything.
+            let designer : ?Principal = if (request.designer == "") null else {
+                switch (PrincipalText.parse(request.designer)) {
+                    case (?value) ?value;
+                    case null return empty;
+                };
+            };
             let filter = {
                 ownership = request.ownership;
-                designer_ownership = request.designer_ownership;
-                policy = request.policy;
                 nsfw = request.nsfw;
+                requirements = request.requirements;
+                designer;
+                search = request.search;
+                sort = request.sort;
             };
-            if (not Directory.validFilter(filter)) {
-                return { rows = []; total = 0; nsfw_hidden = 0 };
-            };
+            if (not Directory.validFilter(filter)) return empty;
             let page = Directory.storeRows(
                 mem,
                 filter,
@@ -584,7 +599,6 @@ module {
                             nsfw = row.nsfw;
                             design_revision = row.design_revision;
                             owned = row.owned;
-                            owns_designer = row.owns_designer;
                             fetched_at_ns = row.fetched_at_ns;
                             contact_name = contactName(row.designer);
                         };

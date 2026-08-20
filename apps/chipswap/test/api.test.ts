@@ -235,7 +235,7 @@ test("crawl progress counts what is left, not only what is done", () => {
   ).toThrow();
 });
 
-test("directory and store rows carry the ownership flags the filters use", () => {
+test("directory and market rows carry the ownership flags the filters use", () => {
   const entry = parseDirectoryEntry({
     canister: "aaaaa-aa",
     source: "trade",
@@ -264,14 +264,12 @@ test("directory and store rows carry the ownership flags the filters use", () =>
     nsfw: true,
     design_revision: "1",
     owned: true,
-    owns_designer: true,
     fetched_at_ns: "9",
     contact_name: "Grace",
   });
   expect(row.owned).toBe(true);
-  expect(row.ownsDesigner).toBe(true);
   expect(row.contactName).toBe("Grace");
-  // The row carries the whole policy, because the store pre-checks an offer
+  // The row carries the whole policy, because the market pre-checks an offer
   // against it before paying for a call.
   expect(row.requirements.minColors).toBe(3);
   expect(row.requirements.maxCoverage).toBeNull();

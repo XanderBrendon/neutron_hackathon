@@ -3,8 +3,10 @@ import Int "mo:core/Int";
 import List "mo:core/List";
 import Map "mo:core/Map";
 import Nat "mo:core/Nat";
+import Order "mo:core/Order";
 import Principal "mo:core/Principal";
 import Text "mo:core/Text";
+import Designs "./Designs";
 import Holdings "./Holdings";
 import Memory "./memory/chipswap/v4";
 import Set "mo:core/Set";
@@ -438,11 +440,19 @@ module {
         };
     };
 
+    public let MAX_REQUIREMENT_FACETS : Nat = 8;
+    public let MAX_SEARCH_CHARS : Nat = 64;
+
+    // `requirements` is a set of facets that widen each other: two of them ask
+    // for the designs matching either, and an empty list asks for no constraint
+    // at all rather than for a facet nothing matches.
     public type StoreFilter = {
         ownership : Text; // all | owned | not_owned
-        designer_ownership : Text; // all | owner_of_designer | not_owner_of_designer
-        policy : Text; // all | open | approval | requirements
         nsfw : Text; // hide | show
+        requirements : [Text]; // tradeable | open | approval | min_colors | max_coverage | tag_rule
+        designer : ?Principal; // null is every designer
+        search : Text; // "" is no constraint
+        sort : Text; // recent | oldest | title | designer
     };
 
     public type StoreRow = {
@@ -454,11 +464,10 @@ module {
         nsfw : Bool;
         design_revision : Nat;
         owned : Bool;
-        owns_designer : Bool;
         fetched_at_ns : Int;
     };
 
-    // `nsfw_hidden` counts what the tag filter removed, so a store that is
+    // `nsfw_hidden` counts what the tag filter removed, so a market that is
     // quietly smaller than the directory can say so rather than just look empty.
     public type StorePage = {
         rows : [StoreRow];
@@ -468,10 +477,21 @@ module {
 
     public func validFilter(filter : StoreFilter) : Bool {
         let ownershipOk = filter.ownership == "all" or filter.ownership == "owned" or filter.ownership == "not_owned";
-        let designerOk = filter.designer_ownership == "all" or filter.designer_ownership == "owner_of_designer" or filter.designer_ownership == "not_owner_of_designer";
-        let policyOk = filter.policy == "all" or filter.policy == "open" or filter.policy == "approval" or filter.policy == "requirements";
         let nsfwOk = filter.nsfw == "hide" or filter.nsfw == "show";
-        ownershipOk and designerOk and policyOk and nsfwOk;
+        let sortOk = filter.sort == "recent" or filter.sort == "oldest" or filter.sort == "title" or filter.sort == "designer";
+        if (not (ownershipOk and nsfwOk and sortOk)) return false;
+        // Both ceilings exist so a caller cannot buy unbounded work with one
+        // request: every facet is a pass over the candidates, and every search
+        // is a pass over the title.
+        if (filter.requirements.size() > MAX_REQUIREMENT_FACETS) return false;
+        for (facet in filter.requirements.values()) {
+            if (not knownFacet(facet)) return false;
+        };
+        filter.search.size() <= MAX_SEARCH_CHARS;
+    };
+
+    func knownFacet(facet : Text) : Bool {
+        facet == "tradeable" or facet == "open" or facet == "approval" or facet == "min_colors" or facet == "max_coverage" or facet == "tag_rule";
     };
 
     // Filtering happens here rather than in the tile so that `total` and paging
@@ -482,6 +502,12 @@ module {
         offset : Nat,
         limit : Nat,
     ) : StorePage {
+        // Measured once for the whole page rather than once per row. Checking a
+        // requirement is arithmetic over a measurement; it is the measuring
+        // behind it that walks seven hundred and fifty-seven pixels. Built only
+        // when the facet is asked for, so an ordinary page pays nothing for it.
+        let candidates = if (wants(filter, "tradeable")) offerCandidates(mem) else [];
+        let needle = if (filter.search == "") null else ?Text.toLower(filter.search);
         let catalogs = Array.sort<(Principal, Memory.CachedCatalog)>(
             Map.toArray(mem.catalog_cache),
             func(left, right) { Principal.compare(left.0, right.0) },
@@ -489,15 +515,15 @@ module {
         let matched = List.empty<StoreRow>();
         var hidden = 0;
         for ((designer, catalog) in catalogs.values()) {
-            let ownsDesigner = Holdings.ownsAnyFrom(mem, designer);
-            // Ignoring and retiring both empty the cache; this keeps the store
+            // Ignoring and retiring both empty the cache; this keeps the market
             // correct even if some other path caches a designer afterwards.
-            if (reachable(mem, designer) and designerOwnershipMatches(filter, ownsDesigner)) {
+            if (reachable(mem, designer) and designerMatches(filter, designer)) {
                 for (design in catalog.designs.values()) {
                     let owned = Holdings.ownsDesign(mem, designer, design.design_id);
                     if (
                         ownershipMatches(filter, owned) and
-                        policyMatches(filter, design.requirements)
+                        searchMatches(needle, design.title) and
+                        facetsMatch(filter, design.requirements, candidates)
                     ) {
                         // Counted before it is dropped: the tag filter is the
                         // one axis whose omissions the owner did not pick row by
@@ -516,7 +542,6 @@ module {
                                     nsfw = design.nsfw;
                                     design_revision = design.design_revision;
                                     owned;
-                                    owns_designer = ownsDesigner;
                                     fetched_at_ns = catalog.fetched_at_ns;
                                 },
                             );
@@ -525,7 +550,9 @@ module {
                 };
             };
         };
-        let all = List.toArray(matched);
+        // Ordered before the window is cut, so the page is a window onto the
+        // order the reader asked for rather than onto the order they arrived in.
+        let all = ordered(List.toArray(matched), filter.sort);
         let total = all.size();
         if (offset >= total or limit == 0) return { rows = []; total; nsfw_hidden = hidden };
         let available : Nat = total - offset;
@@ -545,22 +572,109 @@ module {
         };
     };
 
-    func designerOwnershipMatches(filter : StoreFilter, ownsDesigner : Bool) : Bool {
-        switch (filter.designer_ownership) {
-            case ("owner_of_designer") ownsDesigner;
-            case ("not_owner_of_designer") not ownsDesigner;
-            case (_) true;
+    func designerMatches(filter : StoreFilter, designer : Principal) : Bool {
+        switch (filter.designer) {
+            case (?wanted) Principal.equal(wanted, designer);
+            case null true;
         };
     };
 
-    // "open" and "requirements" are not opposites: a design may ask for the
-    // designer's approval and nothing else, which is neither.
-    func policyMatches(filter : StoreFilter, requirements : Memory.TradeRequirements) : Bool {
-        switch (filter.policy) {
-            case ("open") Requirements.open(requirements);
-            case ("approval") requirements.approval;
-            case ("requirements") Requirements.restrictive(requirements);
-            case (_) true;
+    // Lowered on both sides: the case a reader typed in is not a decision they
+    // made about which chips they wanted, so it is not one the search enforces.
+    func searchMatches(needle : ?Text, title : Text) : Bool {
+        switch (needle) {
+            case (?lowered) Text.contains(Text.toLower(title), #text lowered);
+            case null true;
+        };
+    };
+
+    func wants(filter : StoreFilter, facet : Text) : Bool {
+        Array.find<Text>(filter.requirements, func(entry) { entry == facet }) != null;
+    };
+
+    // "open" and "min_colors" and the rest are not opposites, and they are not
+    // exclusive either: a reader ticking two is asking for the designs matching
+    // either one.
+    func facetsMatch(
+        filter : StoreFilter,
+        requirements : Memory.TradeRequirements,
+        candidates : [(Requirements.Metrics, Bool)],
+    ) : Bool {
+        if (filter.requirements.size() == 0) return true;
+        for (facet in filter.requirements.values()) {
+            let hit = switch (facet) {
+                case ("tradeable") tradeable(requirements, candidates);
+                case ("open") Requirements.open(requirements);
+                case ("approval") requirements.approval;
+                case ("min_colors") requirements.min_colors != null;
+                case ("max_coverage") requirements.max_coverage != null;
+                case ("tag_rule") requirements.nsfw != null;
+                case (_) false;
+            };
+            if (hit) return true;
+        };
+        false;
+    };
+
+    // Approval is not consulted, for the same reason `check` does not consult
+    // it: it decides what becomes of an offer that already qualifies, not
+    // whether it qualifies. A design that holds our offer for its designer is
+    // still one we can make an offer to.
+    func tradeable(
+        requirements : Memory.TradeRequirements,
+        candidates : [(Requirements.Metrics, Bool)],
+    ) : Bool {
+        for ((metrics, nsfw) in candidates.values()) {
+            if (Requirements.check(requirements, metrics, nsfw) == null) return true;
+        };
+        false;
+    };
+
+    // Everything we could put on the table, reduced to what a requirement is
+    // actually measured against.
+    func offerCandidates(mem : Memory.Mem) : [(Requirements.Metrics, Bool)] {
+        let out = List.empty<(Requirements.Metrics, Bool)>();
+        // Offering one of our own published designs mints a fresh copy and
+        // costs us nothing, so it is always on the table. A draft is not: it
+        // cannot be offered at all, and counting it would make designs look
+        // reachable that are not.
+        for (design in Designs.published(mem).values()) {
+            List.add(out, (Requirements.measure(design.art), design.nsfw));
+        };
+        // A chip already committed to a trade in flight is not ours to offer.
+        for ((_, chip) in Map.entries(mem.holdings)) {
+            if (chip.state == #held) {
+                List.add(out, (Requirements.measure(chip.art), chip.nsfw));
+            };
+        };
+        List.toArray(out);
+    };
+
+    // Every order falls back to the designer and then the design id, so a page
+    // boundary lands in the same place every time the same filter is asked for.
+    func ordered(rows : [StoreRow], sort : Text) : [StoreRow] {
+        func tiebreak(left : StoreRow, right : StoreRow) : Order.Order {
+            switch (Principal.compare(left.designer, right.designer)) {
+                case (#equal) Nat.compare(left.design_id, right.design_id);
+                case (other) other;
+            };
+        };
+        func by(rank : (StoreRow, StoreRow) -> Order.Order) : [StoreRow] {
+            Array.sort<StoreRow>(
+                rows,
+                func(left, right) {
+                    switch (rank(left, right)) {
+                        case (#equal) tiebreak(left, right);
+                        case (other) other;
+                    };
+                },
+            );
+        };
+        switch (sort) {
+            case ("recent") by(func(l, r) { Int.compare(r.fetched_at_ns, l.fetched_at_ns) });
+            case ("oldest") by(func(l, r) { Int.compare(l.fetched_at_ns, r.fetched_at_ns) });
+            case ("title") by(func(l, r) { Text.compare(Text.toLower(l.title), Text.toLower(r.title)) });
+            case (_) by(func(_, _) { #equal });
         };
     };
 

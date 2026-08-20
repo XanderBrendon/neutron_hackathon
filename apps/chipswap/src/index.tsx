@@ -4,7 +4,7 @@ import { cx, nt } from "neutron-design-system";
 import { errorMessage, loadStatus, type Status } from "./api.ts";
 import { Collection } from "./views/collection.tsx";
 import { DirectoryView } from "./views/directory.tsx";
-import { Store } from "./views/store.tsx";
+import { Market } from "./views/market.tsx";
 import { Studio } from "./views/studio.tsx";
 import { Trades } from "./views/trades.tsx";
 import "./style.scss";
@@ -12,7 +12,7 @@ import "./style.scss";
 const VIEWS = [
   { id: "studio", label: "Studio" },
   { id: "collection", label: "Collection" },
-  { id: "store", label: "Store" },
+  { id: "market", label: "Market" },
   { id: "trades", label: "Trades" },
   { id: "directory", label: "Directory" },
 ] as const;
@@ -91,7 +91,7 @@ export const App = () => {
           {view === "collection" ? (
             <Collection status={status} onChanged={refresh} />
           ) : null}
-          {view === "store" ? <Store status={status} onChanged={refresh} /> : null}
+          {view === "market" ? <Market status={status} onChanged={refresh} /> : null}
           {view === "trades" ? <Trades onChanged={refresh} /> : null}
           {view === "directory" ? (
             <DirectoryView status={status} onChanged={refresh} />

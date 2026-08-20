@@ -414,11 +414,56 @@
     min-width: 0;
   }
 
-  .chipswap-filters {
+  /* The standing choices sit above the collapsed section rather than inside
+     it: asking for tagged chips, and asking for fresh catalogs, are things a
+     reader does without having gone looking for a filter first. */
+  .chipswap-market-bar {
+    align-items: center;
     display: flex;
     flex-wrap: wrap;
-    gap: var(--nt-gap-2);
+    gap: var(--nt-gap-3);
+    margin-bottom: var(--nt-gap-2);
+  }
+
+  .chipswap-filters {
     margin-bottom: var(--nt-gap-3);
+  }
+
+  /* Two columns rather than the design system's three: there is no leading
+     icon here, and a copy block starting in the icon's slot reads as indented
+     by accident. */
+  .chipswap-filters .nt-disclosure-trigger {
+    grid-template-columns: minmax(0, 1fr) 24px;
+  }
+
+  .chipswap-filter-grid {
+    display: grid;
+    gap: var(--nt-gap-3);
+    grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+    align-items: start;
+  }
+
+  /* The facets are a group rather than a row of independent boxes, so they
+     span the grid instead of competing with the selects for a column. */
+  .chipswap-facets {
+    border: 0;
+    display: grid;
+    gap: 4px;
+    grid-column: 1 / -1;
+    margin: 0;
+    min-inline-size: 0;
+    padding: 0;
+  }
+
+  .chipswap-facets .nt-help {
+    margin: 0 0 4px;
+  }
+
+  .chipswap-check {
+    align-items: center;
+    display: flex;
+    flex-direction: row;
+    gap: var(--nt-gap-2);
   }
 
   .chipswap-offer {

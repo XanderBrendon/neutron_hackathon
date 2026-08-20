@@ -12,20 +12,23 @@ import {
   shortPrincipal,
   type Chip,
   type Design,
+  type DirectoryEntry,
+  type MarketFilter,
   type Status,
-  type StoreFilter,
   type StoreRow,
 } from "../api.ts";
 import { ChipCanvas } from "../chip_canvas.tsx";
 import { decodePixels } from "../chip.ts";
 import {
-  DESIGNER_OPTIONS,
-  NSFW_OPTIONS,
-  OWNERSHIP_OPTIONS,
-  POLICY_OPTIONS,
+  MAX_SEARCH_CHARS,
+  REQUIREMENT_FACETS,
+  SORT_OPTIONS,
   defaultFilter,
   filterLabel,
-} from "../store_filter.ts";
+  isDefaultFilter,
+  toggleFacet,
+  type MarketSort,
+} from "../market_filter.ts";
 import { PolicyBadges } from "../trade_policy.tsx";
 import {
   check,
@@ -37,14 +40,27 @@ import {
 
 const PAGE_SIZE = 24;
 const BATCH = 8;
+const DIRECTORY_PAGE = 100;
+// A whole directory is 512 entries, so this is the walk's ceiling rather than a
+// sample of it: a designer missing from the picker would look like a designer
+// with nothing to show.
+const DIRECTORY_CEILING = 512;
+// Long enough that typing a word does not cost a query per keystroke, short
+// enough that the market does not feel like it is lagging behind the box.
+const SEARCH_DEBOUNCE_MS = 250;
 
 type Props = {
   status: Status | null;
   onChanged: () => void | Promise<void>;
 };
 
-export const Store = ({ status, onChanged }: Props) => {
-  const [filter, setFilter] = useState<StoreFilter>(defaultFilter());
+export const Market = ({ status, onChanged }: Props) => {
+  const [filter, setFilter] = useState<MarketFilter>(defaultFilter());
+  const [filtersOpen, setFiltersOpen] = useState(false);
+  // The box is its own state so a query is not sent for every keystroke. The
+  // filter is what the market was actually asked for.
+  const [searchDraft, setSearchDraft] = useState("");
+  const [designers, setDesigners] = useState<DirectoryEntry[]>([]);
   const [rows, setRows] = useState<StoreRow[]>([]);
   const [total, setTotal] = useState(0);
   const [nsfwHidden, setNsfwHidden] = useState(0);
@@ -57,7 +73,7 @@ export const Store = ({ status, onChanged }: Props) => {
   const [heldChips, setHeldChips] = useState<Chip[]>([]);
 
   const reload = useCallback(
-    async (nextFilter: StoreFilter, nextOffset: number) => {
+    async (nextFilter: MarketFilter, nextOffset: number) => {
       try {
         const page = await loadStore(nextFilter, nextOffset, PAGE_SIZE);
         setRows(page.rows);
@@ -74,6 +90,60 @@ export const Store = ({ status, onChanged }: Props) => {
   useEffect(() => {
     void reload(filter, offset);
   }, [filter, offset, reload, status?.revision]);
+
+  useEffect(() => {
+    if (searchDraft === filter.search) return;
+    const timer = setTimeout(() => {
+      setOffset(0);
+      setFilter((current) => ({ ...current, search: searchDraft }));
+    }, SEARCH_DEBOUNCE_MS);
+    return () => clearTimeout(timer);
+  }, [filter.search, searchDraft]);
+
+  // Only the designers who have something cached can put a row in the market,
+  // so those are the only ones the picker offers.
+  useEffect(() => {
+    void (async () => {
+      try {
+        const found: DirectoryEntry[] = [];
+        let cursor = 0;
+        for (;;) {
+          const page = await loadDirectory(cursor, DIRECTORY_PAGE);
+          found.push(...page.entries);
+          cursor += page.entries.length;
+          if (
+            page.entries.length === 0 ||
+            cursor >= page.total ||
+            cursor >= DIRECTORY_CEILING
+          ) {
+            break;
+          }
+        }
+        setDesigners(
+          found.filter(
+            (entry) => !entry.ignored && !entry.retired && entry.designCount > 0,
+          ),
+        );
+      } catch (error) {
+        setFailure(errorMessage(error));
+      }
+    })();
+  }, [status?.revision]);
+
+  // Takes the change as a function of the current filter rather than a value,
+  // so a facet toggled from a stale render cannot undo the one before it. Every
+  // change also returns to the first page: the page a row sat on is a fact
+  // about the old filter.
+  const amend = (change: (current: MarketFilter) => Partial<MarketFilter>) => {
+    setOffset(0);
+    setFilter((current) => ({ ...current, ...change(current) }));
+  };
+
+  const clearFilters = () => {
+    setOffset(0);
+    setSearchDraft("");
+    setFilter(defaultFilter());
+  };
 
   const handleRefresh = async () => {
     setBusy(true);
@@ -200,48 +270,35 @@ export const Store = ({ status, onChanged }: Props) => {
   };
 
   return (
-    <section className="nt-panel chipswap-store">
+    <section className="nt-panel chipswap-market">
       <header className="nt-section-header">
-        <h2 className="nt-section-heading">Store</h2>
+        <h2 className="nt-section-heading">Market</h2>
         <span className="nt-section-count">
           {total} chip{total === 1 ? "" : "s"} · {filterLabel(filter)}
-          {nsfwHidden > 0
-            ? ` · ${nsfwHidden} NSFW hidden`
-            : ""}
+          {nsfwHidden > 0 ? ` · ${nsfwHidden} NSFW hidden` : ""}
         </span>
       </header>
 
-      <div className="chipswap-filters">
-        {(
-          [
-            ["ownership", OWNERSHIP_OPTIONS],
-            ["designerOwnership", DESIGNER_OPTIONS],
-            ["policy", POLICY_OPTIONS],
-            ["nsfw", NSFW_OPTIONS],
-          ] as const
-        ).map(([key, options]) => (
-          <div className="nt-segmented" key={key}>
-            {options.map((option) => (
-              <button
-                aria-pressed={filter[key] === option.value}
-                className={cx("nt-button nt-button--sm", {
-                  "nt-button--secondary": filter[key] !== option.value,
-                })}
-                key={option.value}
-                onClick={() => {
-                  setOffset(0);
-                  setFilter((current) => ({ ...current, [key]: option.value }));
-                }}
-                type="button"
-              >
-                {option.label}
-              </button>
-            ))}
-          </div>
-        ))}
+      <div className="chipswap-market-bar">
+        {/* Outside the collapsed section on purpose: leaving tagged chips out
+            is a standing choice, and asking for them should not require
+            opening anything first. */}
+        <label className="chipswap-check">
+          <input
+            checked={filter.showNsfw}
+            className="nt-checkbox"
+            data-tid="chipswap-show-nsfw"
+            onChange={(event) => {
+              const showNsfw = event.currentTarget.checked;
+              amend(() => ({ showNsfw }));
+            }}
+            type="checkbox"
+          />
+          <span className="nt-label">Show NSFW</span>
+        </label>
         <button
           className="nt-button nt-button--sm"
-          data-tid="chipswap-refresh-store"
+          data-tid="chipswap-refresh-catalogs"
           disabled={busy}
           onClick={handleRefresh}
           type="button"
@@ -249,6 +306,125 @@ export const Store = ({ status, onChanged }: Props) => {
           Refresh catalogs
         </button>
       </div>
+
+      <section className="nt-disclosure chipswap-filters">
+        <button
+          aria-controls="chipswap-market-filters"
+          aria-expanded={filtersOpen}
+          className="nt-disclosure-trigger"
+          data-tid="chipswap-filters-toggle"
+          onClick={() => setFiltersOpen((open) => !open)}
+          type="button"
+        >
+          <span className="nt-disclosure-copy">
+            <strong className="nt-disclosure-title">Filters</strong>
+            <span className="nt-disclosure-description">{filterLabel(filter)}</span>
+          </span>
+          <span aria-hidden="true" className="nt-disclosure-chevron">
+            ▾
+          </span>
+        </button>
+
+        <div
+          className="nt-disclosure-content chipswap-filter-grid"
+          hidden={!filtersOpen}
+          id="chipswap-market-filters"
+        >
+          <label className="nt-field">
+            <span className="nt-label">Search</span>
+            <input
+              className="nt-input"
+              maxLength={MAX_SEARCH_CHARS}
+              onChange={(event) => setSearchDraft(event.currentTarget.value)}
+              placeholder="Chip title"
+              type="search"
+              value={searchDraft}
+            />
+          </label>
+
+          <label className="nt-field">
+            <span className="nt-label">Designer</span>
+            <select
+              className="nt-select"
+              onChange={(event) => {
+                const designer = event.currentTarget.value || null;
+                amend(() => ({ designer }));
+              }}
+              value={filter.designer ?? ""}
+            >
+              <option value="">All designers</option>
+              {designers.map((entry) => (
+                <option key={entry.canister} value={entry.canister}>
+                  {entry.contactName ?? shortPrincipal(entry.canister)}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="nt-field">
+            <span className="nt-label">Sort by</span>
+            <select
+              className="nt-select"
+              onChange={(event) => {
+                const sort = event.currentTarget.value as MarketSort;
+                amend(() => ({ sort }));
+              }}
+              value={filter.sort}
+            >
+              {SORT_OPTIONS.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <fieldset className="chipswap-facets">
+            <legend className="nt-label">Trade requirements</legend>
+            <p className="nt-help">
+              Ticking more than one widens the market rather than narrowing it:
+              you get the designs matching any of them.
+            </p>
+            {REQUIREMENT_FACETS.map((facet) => (
+              <label className="chipswap-check" key={facet.value}>
+                <input
+                  checked={filter.requirements.includes(facet.value)}
+                  className="nt-checkbox"
+                  onChange={() =>
+                    amend((current) => ({
+                      requirements: toggleFacet(current.requirements, facet.value),
+                    }))
+                  }
+                  type="checkbox"
+                />
+                <span className="nt-label">{facet.label}</span>
+              </label>
+            ))}
+          </fieldset>
+
+          <label className="chipswap-check">
+            <input
+              checked={filter.hideOwned}
+              className="nt-checkbox"
+              onChange={(event) => {
+                const hideOwned = event.currentTarget.checked;
+                amend(() => ({ hideOwned }));
+              }}
+              type="checkbox"
+            />
+            <span className="nt-label">Hide chips I already own</span>
+          </label>
+
+          <button
+            className="nt-button nt-button--ghost nt-button--sm"
+            disabled={isDefaultFilter(filter)}
+            onClick={clearFilters}
+            type="button"
+          >
+            Clear filters
+          </button>
+        </div>
+      </section>
 
       {failure ? (
         <p className="nt-callout nt-callout--danger" role="alert">
@@ -259,8 +435,9 @@ export const Store = ({ status, onChanged }: Props) => {
 
       {rows.length === 0 ? (
         <p className="nt-muted">
-          Nothing here yet. Add designers in the Directory, then refresh
-          catalogs to see what they have published.
+          {isDefaultFilter(filter)
+            ? "Nothing here yet. Add designers in the Directory, then refresh catalogs to see what they have published."
+            : "No chip matches these filters. Widen them, or clear them to see the whole market."}
         </p>
       ) : (
         <ul className="chipswap-grid">
