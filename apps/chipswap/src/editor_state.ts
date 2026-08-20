@@ -3,7 +3,7 @@
 // undo can hold real snapshots.
 //
 // One rule runs through all of it: a locked pixel is never written, by any
-// action, including a pattern generator.
+// action, including a pattern generator or a stamped image.
 
 import { PIXEL_COUNT } from "./chip.ts";
 import { MAX_PALETTE, isHexColor } from "./palette.ts";
@@ -165,28 +165,78 @@ export function lockAll(state: EditorState): EditorState {
   return withHistory(state, { pixels: state.pixels, locks, palette: state.palette });
 }
 
-/** Commits a generated chip, leaving every locked pixel untouched. */
-export function applyGenerator(
-  state: EditorState,
-  generated: Uint8Array,
-): EditorState {
-  if (generated.length !== PIXEL_COUNT) {
-    throw new Error(`A generated chip has exactly ${PIXEL_COUNT} pixels`);
+/**
+ * A whole chip proposed at once: a generated pattern, or an image stamped over
+ * the artwork. A pattern may bring colours of its own, which is how a
+ * photograph lands on a chip that has never seen those colours.
+ */
+export type Pattern = {
+  pixels: Uint8Array;
+  /** The palette its pixels index into: the chip's, possibly extended. */
+  palette: string[];
+};
+
+function checkPattern(state: EditorState, pattern: Pattern): void {
+  if (pattern.pixels.length !== PIXEL_COUNT) {
+    throw new Error(`A pattern has exactly ${PIXEL_COUNT} pixels`);
   }
-  const pixels = Uint8Array.from(state.pixels);
-  let changed = false;
-  for (let index = 0; index < PIXEL_COUNT; index += 1) {
-    if (state.locks[index] === 1) continue;
-    const value = generated[index]!;
-    if (value >= state.palette.length) {
-      throw new Error("A generated pixel refers to a colour outside the palette");
+  if (pattern.palette.length > MAX_PALETTE) {
+    throw new Error(`A palette holds at most ${MAX_PALETTE} colours`);
+  }
+  if (!pattern.palette.every(isHexColor)) {
+    throw new Error("A pattern palette must be lowercase #rrggbb colours");
+  }
+  // The palette may grow, but the colours already on the chip have to keep
+  // their index: a locked pixel is never written to, so if its colour moved it
+  // would change anyway, without anything having touched it.
+  if (state.palette.some((colour, index) => pattern.palette[index] !== colour)) {
+    throw new Error("A pattern palette must extend the chip's own palette");
+  }
+  for (const value of pattern.pixels) {
+    if (value >= pattern.palette.length) {
+      throw new Error("A pattern pixel refers to a colour outside the palette");
     }
-    if (pixels[index] === value) continue;
-    pixels[index] = value;
-    changed = true;
   }
-  if (!changed) return state;
-  return withHistory(state, { pixels, locks: state.locks, palette: state.palette });
+}
+
+/**
+ * Whether a pattern still lines up with this chip. A preview held open across
+ * an edit can go stale — removing a palette colour renumbers the pixels — and
+ * a stale preview is dropped rather than drawn against the wrong colours.
+ */
+export function patternFits(state: EditorState, pattern: Pattern): boolean {
+  return (
+    pattern.pixels.length === PIXEL_COUNT &&
+    pattern.palette.length <= MAX_PALETTE &&
+    state.palette.every((colour, index) => pattern.palette[index] === colour)
+  );
+}
+
+/**
+ * The chip as the pattern would leave it, so a preview shows what applying it
+ * really does: locked pixels keep the colour they have.
+ */
+export function previewPattern(state: EditorState, pattern: Pattern): Uint8Array {
+  checkPattern(state, pattern);
+  const pixels = Uint8Array.from(pattern.pixels);
+  for (let index = 0; index < PIXEL_COUNT; index += 1) {
+    if (state.locks[index] === 1) pixels[index] = state.pixels[index]!;
+  }
+  return pixels;
+}
+
+/** Commits a pattern, leaving every locked pixel untouched. */
+export function applyPattern(state: EditorState, pattern: Pattern): EditorState {
+  const pixels = previewPattern(state, pattern);
+  const grew = pattern.palette.length > state.palette.length;
+  if (!grew && pixels.every((value, index) => value === state.pixels[index])) {
+    return state;
+  }
+  return withHistory(state, {
+    pixels,
+    locks: state.locks,
+    palette: [...pattern.palette],
+  });
 }
 
 export function addPaletteColor(state: EditorState, color: string): EditorState {

@@ -62,6 +62,7 @@
   }
 
   .chipswap-canvas-base,
+  .chipswap-canvas-image,
   .chipswap-canvas-overlay {
     display: block;
     height: 100%;
@@ -72,6 +73,12 @@
 
   .chipswap-canvas-base {
     image-rendering: pixelated;
+  }
+
+  /* While a picture is being sited under the chip the artwork steps back, so
+     the picture is legible and the chip still shows where its pixels fall. */
+  .chipswap-canvas-base--ghost {
+    opacity: 0.35;
   }
 
   .chipswap-canvas-overlay {
@@ -255,6 +262,11 @@
      of its own: the design system's underline vanishes against a dark swatch. */
   .chipswap-blend-select {
     box-shadow: inset 0 0 0 1px var(--nt-line-strong);
+  }
+
+  /* The button opens it; the input itself is never the control. */
+  .chipswap-file {
+    display: none;
   }
 
   .chipswap-brushes {

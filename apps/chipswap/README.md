@@ -21,6 +21,13 @@ it — you no longer own it and would have to trade for it again. A design set t
 *accept any trade* completes in a single call; a design set to *designer
 approves* holds the offered chip in escrow until you accept or decline.
 
+**Stamping a picture.** A picture chosen from a file or pasted from the
+clipboard is placed under the chip, dragged and scaled against a live preview,
+and then sampled: each chip pixel takes the average colour of the picture
+underneath it, and the picture's colours are reduced by median cut to a budget
+that fits the palette. Locked pixels are left out of it — they keep their
+colour, and their samples take no part in the reduction.
+
 **Nothing is guessed.** An offer in flight is escrowed rather than deleted. If a
 peer never answers, the trade becomes `uncertain` and the chip stays committed
 until the `status` route says what actually happened — the app never restores a
@@ -107,6 +114,8 @@ src/
   brushes.ts        preset and custom brushes
   patterns.ts       ring, spoke, and grid generators
   flood.ts          the region a fill covers
+  image_stamp.ts    sampling a picture down to 757 pixels
+  image_source.ts   files and clipboard pictures into a raster
   editor_state.ts   pure editor reducers with undo and locks
   api.ts            typed self calls and payload parsers
   views/            studio, collection, store, trades, directory

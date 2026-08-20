@@ -2,7 +2,8 @@
 // pixelated smoothing, so a chip is always drawn at exact pixel boundaries. A
 // second canvas on top carries the lock hatch, the pixel grid and the brush
 // hint, which need sub-cell drawing and must not disturb the artwork
-// underneath. Both follow the circular mask, so the corners of the square are
+// underneath. A third can sit beneath both, holding a picture being placed for
+// a stamp; while it is there the artwork steps back so the picture reads. Both follow the circular mask, so the corners of the square are
 // blank rather than looking like cells nobody is allowed to paint. The optional
 // centreline accent is the same geometry drawn heavier over the middle row and
 // column.
@@ -53,6 +54,18 @@ export type HoverPreview = {
   colour: string;
 };
 
+/**
+ * A picture under the artwork while it is being sited, positioned in chip
+ * pixels, so the same numbers place it and sample it.
+ */
+export type Underlay = {
+  source: CanvasImageSource;
+  left: number;
+  top: number;
+  width: number;
+  height: number;
+};
+
 export type ChipCanvasProps = {
   pixels: Uint8Array;
   palette: string[];
@@ -64,6 +77,7 @@ export type ChipCanvasProps = {
   label: string;
   onPaint?: ((x: number, y: number, phase: PaintPhase) => void) | undefined;
   hoverPreview?: ((x: number, y: number) => HoverPreview | null) | undefined;
+  underlay?: Underlay | null | undefined;
 };
 
 export const ChipCanvas = ({
@@ -77,8 +91,10 @@ export const ChipCanvas = ({
   label,
   onPaint,
   hoverPreview,
+  underlay,
 }: ChipCanvasProps) => {
   const baseRef = useRef<HTMLCanvasElement | null>(null);
+  const imageRef = useRef<HTMLCanvasElement | null>(null);
   const overlayRef = useRef<HTMLCanvasElement | null>(null);
   const painting = useRef(false);
   const lastCell = useRef<string | null>(null);
@@ -116,6 +132,25 @@ export const ChipCanvas = ({
     }
     context.putImageData(image, 0, 0);
   }, [pixels, palette]);
+
+  useEffect(() => {
+    const canvas = imageRef.current;
+    if (!canvas) return;
+    const context = canvas.getContext("2d");
+    if (!context) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!underlay) return;
+    // Drawn over the whole square rather than clipped to the chip, so the parts
+    // of the picture that would fall off the edge are visible while it is being
+    // placed rather than only their absence.
+    context.drawImage(
+      underlay.source,
+      underlay.left * scale,
+      underlay.top * scale,
+      underlay.width * scale,
+      underlay.height * scale,
+    );
+  }, [scale, underlay]);
 
   useEffect(() => {
     const canvas = overlayRef.current;
@@ -247,9 +282,21 @@ export const ChipCanvas = ({
       className={className ? `chipswap-canvas ${className}` : "chipswap-canvas"}
       style={{ width: `${size}px`, height: `${size}px` }}
     >
+      {underlay ? (
+        <canvas
+          className="chipswap-canvas-image"
+          height={size}
+          ref={imageRef}
+          width={size}
+        />
+      ) : null}
       <canvas
         aria-label={label}
-        className="chipswap-canvas-base"
+        className={
+          underlay
+            ? "chipswap-canvas-base chipswap-canvas-base--ghost"
+            : "chipswap-canvas-base"
+        }
         height={DIAMETER}
         ref={baseRef}
         role="img"
@@ -264,7 +311,9 @@ export const ChipCanvas = ({
         onPointerMove={handleMove}
         onPointerUp={handleUp}
         ref={overlayRef}
-        style={{ cursor: onPaint ? "crosshair" : "default" }}
+        style={{
+          cursor: !onPaint ? "default" : underlay ? "grab" : "crosshair",
+        }}
         width={size}
       />
     </div>

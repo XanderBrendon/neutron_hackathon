@@ -29,7 +29,7 @@ import { ChipCanvas } from "../chip_canvas.tsx";
 import { decodePixels, encodePixels, pixelIndexAt } from "../chip.ts";
 import {
   addPaletteColor,
-  applyGenerator,
+  applyPattern,
   canRemovePaletteColor,
   createEditorState,
   endStroke,
@@ -37,14 +37,19 @@ import {
   markSaved,
   paint,
   paintLocks,
+  patternFits,
+  previewPattern,
   redo,
   removePaletteColor,
   selectColor,
   undo,
   unlockAll,
   type EditorState,
+  type Pattern,
 } from "../editor_state.ts";
 import { floodRegion } from "../flood.ts";
+import { buildStamp, coverPlacement } from "../image_stamp.ts";
+import { clipboardImage, loadImage, type LoadedImage } from "../image_source.ts";
 import { GENERATORS, renderGenerator, type GeneratorId } from "../patterns.ts";
 import { MAX_PALETTE, blendColors, contrastColor } from "../palette.ts";
 
@@ -92,13 +97,22 @@ export const Studio = ({ status, onChanged }: Props) => {
   const [bands, setBands] = useState(4);
   const [rotation, setRotation] = useState(0);
   const [generatorColors, setGeneratorColors] = useState<number[]>([0, 1]);
-  const [preview, setPreview] = useState<Uint8Array | null>(null);
+  const [preview, setPreview] = useState<Pattern | null>(null);
+  // A picture waiting to be stamped. It is not part of the chip until it is,
+  // so it lives here rather than in the editor's history.
+  const [image, setImage] = useState<LoadedImage | null>(null);
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const [stampColors, setStampColors] = useState(12);
+  const [showImage, setShowImage] = useState(true);
   const [publishMode, setPublishMode] = useState<TradeMode>("auto");
   const [confirmPublish, setConfirmPublish] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const paletteRef = useRef<HTMLDivElement | null>(null);
+  const fileRef = useRef<HTMLInputElement | null>(null);
+  const dragFrom = useRef<{ x: number; y: number } | null>(null);
 
   const selected = designs.find((design) => design.designId === selectedId) ?? null;
   const editable = selected?.state === "draft";
@@ -153,6 +167,7 @@ export const Studio = ({ status, onChanged }: Props) => {
       }),
     );
     setPreview(null);
+    clearImage();
     setPicker(false);
     setConfirmPublish(false);
     setPublishMode(selected.tradeMode);
@@ -176,6 +191,34 @@ export const Studio = ({ status, onChanged }: Props) => {
       document.removeEventListener("keydown", escape);
     };
   }, [picker]);
+
+  // A picture on the clipboard is the quickest way in, so a paste anywhere on
+  // the page starts a stamp — except inside a text field, where a paste is text.
+  useEffect(() => {
+    if (!editable) return;
+    const onPaste = (event: ClipboardEvent) => {
+      const target = event.target;
+      if (
+        target instanceof HTMLElement &&
+        target.closest("input, textarea, [contenteditable]")
+      ) {
+        return;
+      }
+      const file = clipboardImage(event.clipboardData);
+      if (!file) return;
+      event.preventDefault();
+      void openImage(file);
+    };
+    document.addEventListener("paste", onPaste);
+    return () => document.removeEventListener("paste", onPaste);
+  }, [editable]);
+
+  // A preview indexes into the palette it was made with, so changing the
+  // palette puts it away rather than leaving it to be read against colours it
+  // was never drawn for.
+  useEffect(() => {
+    setPreview(null);
+  }, [editor?.palette]);
 
   const brushes = useMemo(
     () => [...PRESET_BRUSHES, ...customBrushes],
@@ -303,6 +346,70 @@ export const Studio = ({ status, onChanged }: Props) => {
     }
   };
 
+  // Nothing on the network changed, so there is nothing to refresh: this is
+  // the local half of run(), without the reload.
+  const openImage = async (blob: Blob) => {
+    setBusy(true);
+    setFailure(null);
+    setMessage(null);
+    try {
+      const loaded = await loadImage(blob);
+      setPreview(null);
+      setImage(loaded);
+      setZoom(1);
+      setOffset({ x: 0, y: 0 });
+      setShowImage(true);
+      setMessage("Drag the picture to place it, then stamp it onto the chip.");
+    } catch (error) {
+      setFailure(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const handleChooseImage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    // Cleared straight away, so choosing the same file twice still fires.
+    event.currentTarget.value = "";
+    if (file) void openImage(file);
+  };
+
+  // Reading the clipboard needs permission and some browsers have no such API,
+  // so the key press is the path that always works and this is the shortcut.
+  const handlePasteImage = async () => {
+    try {
+      for (const item of await navigator.clipboard.read()) {
+        const type = item.types.find((entry) => entry.startsWith("image/"));
+        if (!type) continue;
+        await openImage(await item.getType(type));
+        return;
+      }
+      setFailure("There is no picture on the clipboard.");
+    } catch {
+      setFailure("This browser kept the clipboard to itself. Press Ctrl/Cmd+V instead.");
+    }
+  };
+
+  // While a picture is being placed the chip is a drag surface rather than a
+  // canvas: the pointer moves the picture instead of painting on it.
+  const handleDragImage = (
+    x: number,
+    y: number,
+    phase: "start" | "move" | "end",
+  ) => {
+    if (phase !== "move") {
+      dragFrom.current = phase === "start" ? { x, y } : null;
+      return;
+    }
+    const from = dragFrom.current;
+    if (!from) return;
+    dragFrom.current = { x, y };
+    setOffset((current) => ({
+      x: current.x + x - from.x,
+      y: current.y + y - from.y,
+    }));
+  };
+
   const handleCreate = () =>
     run(async () => {
       const designId = await createDraft(`Chip ${designs.length + 1}`);
@@ -428,6 +535,32 @@ export const Studio = ({ status, onChanged }: Props) => {
       setMessage(count === 1 ? "Brush deleted." : `${count} brushes deleted.`);
     });
 
+  const clearImage = () => {
+    setImage(null);
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
+    setShowImage(true);
+  };
+
+  const placement = useMemo(
+    () => (image ? coverPlacement(image.raster, zoom, offset.x, offset.y) : null),
+    [image, zoom, offset.x, offset.y],
+  );
+  // The palette decides how much of the picture can survive: colours it cannot
+  // add are colours the picture has to do without.
+  const room = MAX_PALETTE - (editor?.palette.length ?? MAX_PALETTE);
+  const colourMax = Math.min(32, Math.max(0, room));
+  const stampBudget = Math.min(stampColors, colourMax);
+  // Resampled on every nudge of the placement, so the chip underneath the
+  // picture is always the chip that stamping would produce.
+  const stamped = useMemo(
+    () =>
+      image && editor && placement
+        ? buildStamp(image.raster, placement, editor, stampBudget)
+        : null,
+    [editor, image, placement, stampBudget],
+  );
+
   const generator = GENERATORS.find((entry) => entry.id === generatorId)!;
 
   const handlePreview = () => {
@@ -440,17 +573,40 @@ export const Studio = ({ status, onChanged }: Props) => {
       return;
     }
     setFailure(null);
-    setPreview(renderGenerator(generatorId, { paletteIndices: indices, bands, rotation }));
+    setPreview({
+      pixels: renderGenerator(generatorId, { paletteIndices: indices, bands, rotation }),
+      palette: editor.palette,
+    });
   };
 
   const handleApply = () => {
     if (!editor || !preview) return;
-    setEditor(applyGenerator(editor, preview));
+    setEditor(applyPattern(editor, preview));
     setPreview(null);
     setMessage("Pattern applied. Locked pixels were left alone.");
   };
 
-  const shownPixels = preview ?? editor?.pixels ?? new Uint8Array(0);
+  const handleStamp = () => {
+    if (!editor || !stamped) return;
+    setEditor(applyPattern(editor, stamped));
+    const added = stamped.added;
+    clearImage();
+    setMessage(
+      added === 0
+        ? "Image stamped. Locked pixels were left alone."
+        : `Image stamped, ${added} ${added === 1 ? "colour" : "colours"} added. Locked pixels were left alone.`,
+    );
+  };
+
+  // What the chip shows: a stamp being placed outranks a generator preview,
+  // because the picture is the thing in hand. Either way the locked pixels are
+  // drawn as they will stay, so the preview is the result and not a promise.
+  const pattern =
+    stamped ?? (preview && editor && patternFits(editor, preview) ? preview : null);
+  const placing = Boolean(image && showImage);
+  const shownPixels =
+    editor && pattern ? previewPattern(editor, pattern) : editor?.pixels ?? new Uint8Array(0);
+  const shownPalette = pattern?.palette ?? editor?.palette ?? [];
 
   return (
     <section className="chipswap-studio">
@@ -564,26 +720,36 @@ export const Studio = ({ status, onChanged }: Props) => {
 
             <ChipCanvas
               className="chipswap-editor-canvas"
-              hoverPreview={editable ? hoverPreview : undefined}
+              hoverPreview={editable && !placing ? hoverPreview : undefined}
               label={`${selected.title} artwork`}
               locks={editor.locks}
-              onPaint={editable ? handlePaint : undefined}
-              palette={editor.palette}
+              onPaint={editable ? (placing ? handleDragImage : handlePaint) : undefined}
+              palette={shownPalette}
               pixels={shownPixels}
               scale={12}
               showCenterlines={centerlines}
               showGrid
+              underlay={
+                placing && placement && image
+                  ? { source: image.source, ...placement }
+                  : null
+              }
             />
 
-            {preview ? (
+            {pattern ? (
               <div className="nt-cluster">
                 <span className="nt-tag nt-tag--warning">Preview</span>
-                <button className="nt-button nt-button--sm" onClick={handleApply} type="button">
-                  Apply pattern
+                <button
+                  className="nt-button nt-button--sm"
+                  data-tid="chipswap-apply-pattern"
+                  onClick={stamped ? handleStamp : handleApply}
+                  type="button"
+                >
+                  {stamped ? "Stamp image" : "Apply pattern"}
                 </button>
                 <button
                   className="nt-button nt-button--ghost nt-button--sm"
-                  onClick={() => setPreview(null)}
+                  onClick={stamped ? clearImage : () => setPreview(null)}
                   type="button"
                 >
                   Cancel
@@ -993,8 +1159,8 @@ export const Studio = ({ status, onChanged }: Props) => {
               </button>
             </div>
             <p className="nt-help">
-              Locked pixels are hatched and no action writes to them, generators
-              included.
+              Locked pixels are hatched and no action writes to them —
+              generators and stamped pictures included.
             </p>
           </section>
 
@@ -1068,11 +1234,134 @@ export const Studio = ({ status, onChanged }: Props) => {
             <button
               className="nt-button nt-button--sm"
               data-tid="chipswap-preview-pattern"
+              disabled={image !== null}
               onClick={handlePreview}
+              title={image ? "Stamp or remove the picture first" : undefined}
               type="button"
             >
               Preview pattern
             </button>
+          </section>
+
+          <section className="nt-section">
+            <h3 className="nt-section-title">Stamp an image</h3>
+            {image ? (
+              <>
+                <label className="nt-field">
+                  <span className="nt-label">Size: {Math.round(zoom * 100)}%</span>
+                  <input
+                    className="chipswap-range"
+                    max={4}
+                    min={0.2}
+                    onChange={(event) => setZoom(Number(event.currentTarget.value))}
+                    step={0.05}
+                    type="range"
+                    value={zoom}
+                  />
+                </label>
+                {colourMax > 0 ? (
+                  <label className="nt-field">
+                    <span className="nt-label">
+                      {stampBudget === 0
+                        ? "Colours: the chip's own palette"
+                        : `Colours from the picture: ${stampBudget}`}
+                    </span>
+                    <input
+                      className="chipswap-range"
+                      max={colourMax}
+                      min={0}
+                      onChange={(event) => setStampColors(Number(event.currentTarget.value))}
+                      step={1}
+                      type="range"
+                      value={stampBudget}
+                    />
+                  </label>
+                ) : (
+                  <p className="nt-help">
+                    The palette is full, so the picture is approximated with the
+                    colours the chip already has.
+                  </p>
+                )}
+                <div className="nt-cluster">
+                  <button
+                    className="nt-button nt-button--sm"
+                    data-tid="chipswap-stamp"
+                    onClick={handleStamp}
+                    type="button"
+                  >
+                    Stamp
+                  </button>
+                  <button
+                    aria-pressed={!showImage}
+                    className={cx("nt-button nt-button--sm", {
+                      "nt-button--secondary": showImage,
+                    })}
+                    onClick={() => setShowImage((shown) => !shown)}
+                    type="button"
+                  >
+                    {showImage ? "Hide picture" : "Show picture"}
+                  </button>
+                  <button
+                    className="nt-button nt-button--ghost nt-button--sm"
+                    onClick={() => {
+                      setZoom(1);
+                      setOffset({ x: 0, y: 0 });
+                    }}
+                    type="button"
+                  >
+                    Recentre
+                  </button>
+                  <button
+                    className="nt-button nt-button--ghost nt-button--sm"
+                    onClick={clearImage}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </div>
+                <p className="nt-help">
+                  Drag the picture across the chip to place it. Every chip pixel
+                  takes the average colour of the picture underneath it, and
+                  locked pixels keep what they have. Source: {image.width} ×{" "}
+                  {image.height} px.
+                </p>
+              </>
+            ) : (
+              <>
+                <div className="nt-cluster">
+                  <button
+                    className="nt-button nt-button--sm"
+                    data-tid="chipswap-choose-image"
+                    disabled={busy}
+                    onClick={() => fileRef.current?.click()}
+                    type="button"
+                  >
+                    Choose a picture…
+                  </button>
+                  <button
+                    className="nt-button nt-button--secondary nt-button--sm"
+                    disabled={busy}
+                    onClick={() => void handlePasteImage()}
+                    type="button"
+                  >
+                    Paste
+                  </button>
+                </div>
+                <input
+                  accept="image/*"
+                  aria-label="Picture to stamp"
+                  className="chipswap-file"
+                  onChange={handleChooseImage}
+                  ref={fileRef}
+                  type="file"
+                />
+                <p className="nt-help">
+                  Or press Ctrl/Cmd+V with a picture on the clipboard. A chip is
+                  31 pixels across, so what lands on it is an impression of the
+                  picture rather than the picture.
+                </p>
+              </>
+            )}
           </section>
         </aside>
       ) : null}

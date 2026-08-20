@@ -3,12 +3,13 @@ import { PIXEL_COUNT, pixelIndexAt } from "../src/chip.ts";
 import {
   addPaletteColor,
   endStroke,
-  applyGenerator,
+  applyPattern,
   canRemovePaletteColor,
   createEditorState,
   lockAllOfColor,
   paint,
   paintLocks,
+  previewPattern,
   redo,
   removePaletteColor,
   undo,
@@ -62,7 +63,7 @@ test("locked pixels survive every mutation", () => {
   expect(paint(state, [A, B], 2).pixels[B]).toBe(2);
 
   const generated = new Uint8Array(PIXEL_COUNT).fill(2);
-  const filled = applyGenerator(state, generated);
+  const filled = applyPattern(state, { pixels: generated, palette: PALETTE });
   expect(filled.pixels[A]).toBe(1);
   expect(filled.pixels[B]).toBe(2);
 });
@@ -190,4 +191,55 @@ test("removing a colour renumbers the pixels above it", () => {
   expect(removed.palette).toEqual(["#000000", "#ffffff", "#123456"]);
   expect(removed.pixels[A]).toBe(2);
   expect(removed.pixels[B]).toBe(1);
+});
+
+test("a pattern preview shows the locked pixels as they will stay", () => {
+  let state = paint(fresh(), [A], 1);
+  state = paintLocks(state, [A], true);
+  const generated = new Uint8Array(PIXEL_COUNT).fill(2);
+
+  // What the preview draws is what applying it produces, pixel for pixel.
+  const shown = previewPattern(state, { pixels: generated, palette: PALETTE });
+  expect(shown[A]).toBe(1);
+  expect(shown[B]).toBe(2);
+  expect([...shown]).toEqual([
+    ...applyPattern(state, { pixels: generated, palette: PALETTE }).pixels,
+  ]);
+});
+
+test("a pattern may bring colours of its own", () => {
+  const state = fresh();
+  const pixels = new Uint8Array(PIXEL_COUNT).fill(3);
+  const stamped = applyPattern(state, {
+    pixels,
+    palette: [...PALETTE, "#112233"],
+  });
+
+  expect(stamped.palette).toEqual([...PALETTE, "#112233"]);
+  expect(stamped.pixels[A]).toBe(3);
+  expect(undo(stamped).palette).toEqual(PALETTE);
+});
+
+test("a pattern that renames the chip's colours is refused", () => {
+  const state = fresh();
+  const pixels = new Uint8Array(PIXEL_COUNT);
+
+  // Dropping or reordering an existing colour would repaint the pixels the
+  // pattern is not allowed to touch.
+  expect(() =>
+    applyPattern(state, { pixels, palette: ["#ffffff", "#000000", "#7fd1c1"] }),
+  ).toThrow();
+  expect(() => applyPattern(state, { pixels, palette: ["#000000"] })).toThrow();
+  expect(() =>
+    applyPattern(state, {
+      pixels: new Uint8Array(PIXEL_COUNT).fill(9),
+      palette: PALETTE,
+    }),
+  ).toThrow();
+});
+
+test("a pattern that changes nothing does not grow the history", () => {
+  const state = fresh();
+  const pixels = new Uint8Array(PIXEL_COUNT);
+  expect(applyPattern(state, { pixels, palette: PALETTE }).canUndo).toBe(false);
 });
