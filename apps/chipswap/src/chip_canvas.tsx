@@ -15,11 +15,10 @@ import {
   maskCells,
   maskEdges,
   outlineEdges,
-  pixelIndexAt,
   pixelPosition,
   type MaskEdge,
 } from "./chip.ts";
-import { parseHexColor } from "./palette.ts";
+import { chipRgba } from "./chip_png.ts";
 
 export type PaintPhase = "start" | "move" | "end";
 
@@ -106,31 +105,11 @@ export const ChipCanvas = ({
     const context = canvas.getContext("2d");
     if (!context) return;
 
-    const image = context.createImageData(DIAMETER, DIAMETER);
-    const colors = palette.map((entry) => {
-      try {
-        return parseHexColor(entry);
-      } catch {
-        return { r: 0, g: 0, b: 0 };
-      }
-    });
-
-    for (let y = 0; y < DIAMETER; y += 1) {
-      for (let x = 0; x < DIAMETER; x += 1) {
-        const offset = (y * DIAMETER + x) * 4;
-        const index = pixelIndexAt(x, y);
-        if (index === null) {
-          image.data[offset + 3] = 0;
-          continue;
-        }
-        const color = colors[pixels[index] ?? 0] ?? { r: 0, g: 0, b: 0 };
-        image.data[offset] = color.r;
-        image.data[offset + 1] = color.g;
-        image.data[offset + 2] = color.b;
-        image.data[offset + 3] = 255;
-      }
-    }
-    context.putImageData(image, 0, 0);
+    // Shared with the PNG download, so what a chip looks like on screen and
+    // what lands in the file are one definition rather than two that agree
+    // until somebody edits one of them.
+    const data = chipRgba(pixels, palette);
+    context.putImageData(new ImageData(data, DIAMETER, DIAMETER), 0, 0);
   }, [pixels, palette]);
 
   useEffect(() => {

@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 112,
+    version: 114,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [

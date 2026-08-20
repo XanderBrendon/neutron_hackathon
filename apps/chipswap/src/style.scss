@@ -414,6 +414,31 @@
     min-width: 0;
   }
 
+  /* Last in the card and quieter than the rest: taking a picture away is
+     something you go looking for, not the first thing the card offers. */
+  .chipswap-chip-saves {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--nt-gap-1, 4px);
+    margin-top: 4px;
+  }
+
+  .chipswap-save {
+    display: grid;
+    gap: var(--nt-gap-2);
+    margin-top: var(--nt-gap-3);
+  }
+
+  /* Shown far larger than it is. Pixelated keeps a 31px chip a grid of squares
+     rather than a blur, and the saved file is the real image behind it either
+     way, not what the screen made of it. */
+  .chipswap-save-image {
+    display: block;
+    height: auto;
+    image-rendering: pixelated;
+    width: min(248px, 100%);
+  }
+
   /* The standing choices sit above the collapsed section rather than inside
      it: asking for tagged chips, and asking for fresh catalogs, are things a
      reader does without having gone looking for a filter first. */

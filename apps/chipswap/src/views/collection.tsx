@@ -1,28 +1,21 @@
 import { useCallback, useEffect, useState } from "react";
-import { cx } from "neutron-design-system";
 import {
   errorMessage,
-  formatTimestamp,
   loadCollection,
   resolveTrade,
-  shortPrincipal,
   type Chip,
   type Status,
 } from "../api.ts";
-import { ChipCanvas } from "../chip_canvas.tsx";
 import { decodePixels } from "../chip.ts";
+import { ChipCard } from "../chip_card.tsx";
+import { chipFileName, chipPngDataUrl } from "../chip_png.ts";
+import { ChipSavePanel } from "../chip_save_panel.tsx";
 
 const PAGE_SIZE = 24;
 
 type Props = {
   status: Status | null;
   onChanged: () => void | Promise<void>;
-};
-
-const STATE_LABEL: Record<Chip["state"], string> = {
-  held: "Held",
-  escrowed: "Offered in a trade",
-  uncertain: "Outcome unknown",
 };
 
 export const Collection = ({ status, onChanged }: Props) => {
@@ -32,6 +25,12 @@ export const Collection = ({ status, onChanged }: Props) => {
   const [failure, setFailure] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [saving, setSaving] = useState<{
+    title: string;
+    fileName: string;
+    scale: number;
+    src: string;
+  } | null>(null);
 
   const reload = useCallback(async (nextOffset: number) => {
     try {
@@ -47,6 +46,29 @@ export const Collection = ({ status, onChanged }: Props) => {
   useEffect(() => {
     void reload(offset);
   }, [offset, reload, status?.revision]);
+
+  // Drawn here rather than fetched: the collection already holds the art, so a
+  // saved chip is a local render and never another call to the backend.
+  const handleSave = (chip: Chip, scale: number) => {
+    setFailure(null);
+    try {
+      const src = chipPngDataUrl(
+        decodePixels(chip.art.pixels),
+        chip.art.palette,
+        scale,
+      );
+      // Our own designs are not holdings and carry no serial to name them by.
+      const serial = chip.origin === "design" ? null : chip.serial;
+      setSaving({
+        title: chip.title,
+        fileName: chipFileName(chip.title, serial, scale),
+        scale,
+        src,
+      });
+    } catch (error) {
+      setFailure(errorMessage(error));
+    }
+  };
 
   const handleResolve = async (chip: Chip) => {
     if (!chip.requestId) return;
@@ -89,78 +111,15 @@ export const Collection = ({ status, onChanged }: Props) => {
         </p>
       ) : (
         <ul className="chipswap-grid">
-          {chips.map((chip) => {
-            // Our own published designs come back in this page too. They are
-            // not holdings: there is no serial to show, nobody to credit but
-            // us, and no trade to settle.
-            const own = chip.origin === "design";
-            return (
-              <li className="nt-card chipswap-chip-card" key={chip.key}>
-                <ChipCanvas
-                  label={
-                    own
-                      ? `${chip.title}, your design`
-                      : `${chip.title} by ${shortPrincipal(chip.designer)}`
-                  }
-                  palette={chip.art.palette}
-                  pixels={decodePixels(chip.art.pixels)}
-                  scale={4}
-                />
-                <div className="chipswap-chip-meta">
-                  <strong>{chip.title}</strong>
-                  <span className="nt-meta">
-                    {own ? null : <>#{chip.serial} · </>}design {chip.designId}
-                  </span>
-                  {chip.nsfw ? (
-                    <span className="nt-tag nt-tag--warning">NSFW</span>
-                  ) : null}
-                  {own ? (
-                    <span className="nt-meta">{chip.mintedCount} minted</span>
-                  ) : (
-                    <span className="nt-meta" title={chip.designer}>
-                      {chip.contactName ?? shortPrincipal(chip.designer)}
-                    </span>
-                  )}
-                  <span className="nt-meta">
-                    {formatTimestamp(chip.acquiredAtNs)}
-                  </span>
-                  {own ? (
-                    <span className="nt-tag">Your design</span>
-                  ) : (
-                    <span
-                      className={cx("nt-tag", {
-                        "nt-tag--warning": chip.state === "escrowed",
-                        "nt-tag--danger": chip.state === "uncertain",
-                      })}
-                    >
-                      {STATE_LABEL[chip.state]}
-                    </span>
-                  )}
-                  {chip.state === "uncertain" ? (
-                    <>
-                      <p className="nt-help">
-                        The other Neutron never confirmed this trade. Ask it what
-                        happened before offering this chip again.
-                      </p>
-                      <button
-                        className="nt-button nt-button--sm"
-                        disabled={busy}
-                        onClick={() => void handleResolve(chip)}
-                        type="button"
-                      >
-                        Ask the designer
-                      </button>
-                    </>
-                  ) : null}
-                  {chip.state === "escrowed" && chip.peer ? (
-                    <span className="nt-meta" title={chip.peer}>
-                      waiting on {shortPrincipal(chip.peer)}
-                    </span>
-                  ) : null}
-                </div>
-              </li>
-            );
-          })}
+          {chips.map((chip) => (
+            <ChipCard
+              busy={busy}
+              chip={chip}
+              key={chip.key}
+              onSave={handleSave}
+              onResolve={(target) => void handleResolve(target)}
+            />
+          ))}
         </ul>
       )}
 
@@ -186,6 +145,16 @@ export const Collection = ({ status, onChanged }: Props) => {
             Next
           </button>
         </footer>
+      ) : null}
+
+      {saving ? (
+        <ChipSavePanel
+          fileName={saving.fileName}
+          onClose={() => setSaving(null)}
+          scale={saving.scale}
+          src={saving.src}
+          title={saving.title}
+        />
       ) : null}
     </section>
   );
