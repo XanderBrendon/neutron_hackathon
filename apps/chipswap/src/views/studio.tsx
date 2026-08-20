@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { cx } from "neutron-design-system";
 import {
   createDraft,
@@ -44,7 +44,7 @@ import {
   type EditorState,
 } from "../editor_state.ts";
 import { GENERATORS, renderGenerator, type GeneratorId } from "../patterns.ts";
-import { blendColors, contrastColor } from "../palette.ts";
+import { MAX_PALETTE, blendColors, contrastColor } from "../palette.ts";
 
 type Tool = "paint" | "lock" | "unlock";
 
@@ -65,6 +65,7 @@ export const Studio = ({ status, onChanged }: Props) => {
   const [brushDraft, setBrushDraft] = useState<Brush | null>(null);
   const [brushName, setBrushName] = useState("");
   const [newColor, setNewColor] = useState("#7fd1c1");
+  const [picker, setPicker] = useState(false);
   const [blendFrom, setBlendFrom] = useState(0);
   const [blendTo, setBlendTo] = useState(1);
   const [blendRatio, setBlendRatio] = useState(0.5);
@@ -78,9 +79,12 @@ export const Studio = ({ status, onChanged }: Props) => {
   const [message, setMessage] = useState<string | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const paletteRef = useRef<HTMLDivElement | null>(null);
 
   const selected = designs.find((design) => design.designId === selectedId) ?? null;
   const editable = selected?.state === "draft";
+  // A full palette can take no more colours, so the flyout has nothing to offer.
+  const full = (editor?.palette.length ?? 0) >= MAX_PALETTE;
 
   const reload = useCallback(async () => {
     try {
@@ -125,9 +129,29 @@ export const Studio = ({ status, onChanged }: Props) => {
       }),
     );
     setPreview(null);
+    setPicker(false);
     setConfirmPublish(false);
     setPublishMode(selected.tradeMode);
   }, [selected?.designId, selected?.revision, selected?.state]);
+
+  // The colour flyout dismisses like any menu: Escape, or a press that lands
+  // outside it. Pointerdown rather than click, so starting a stroke on the chip
+  // puts it away before the paint lands.
+  useEffect(() => {
+    if (!picker) return;
+    const dismiss = (event: PointerEvent) => {
+      if (!paletteRef.current?.contains(event.target as Node)) setPicker(false);
+    };
+    const escape = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setPicker(false);
+    };
+    document.addEventListener("pointerdown", dismiss);
+    document.addEventListener("keydown", escape);
+    return () => {
+      document.removeEventListener("pointerdown", dismiss);
+      document.removeEventListener("keydown", escape);
+    };
+  }, [picker]);
 
   const brushes = useMemo(
     () => [...PRESET_BRUSHES, ...customBrushes],
@@ -554,38 +578,128 @@ export const Studio = ({ status, onChanged }: Props) => {
         <aside className="nt-panel chipswap-tools">
           <section className="nt-section">
             <h3 className="nt-section-title">Palette</h3>
-            <div className="chipswap-swatches">
-              {editor.palette.map((colour, index) => (
+            <div className="chipswap-palette" ref={paletteRef}>
+              <div className="chipswap-swatches">
+                {editor.palette.map((colour, index) => (
+                  <button
+                    aria-pressed={editor.activeColor === index}
+                    className={cx("chipswap-swatch", {
+                      "chipswap-swatch--active": editor.activeColor === index,
+                    })}
+                    key={`${colour}-${index}`}
+                    onClick={() => setEditor(selectColor(editor, index))}
+                    style={{ background: colour, color: contrastColor(colour) }}
+                    title={colour}
+                    type="button"
+                  >
+                    {index}
+                  </button>
+                ))}
                 <button
-                  aria-pressed={editor.activeColor === index}
-                  className={cx("chipswap-swatch", {
-                    "chipswap-swatch--active": editor.activeColor === index,
+                  aria-controls="chipswap-picker"
+                  aria-expanded={picker}
+                  aria-label="Add a colour"
+                  className={cx("chipswap-swatch chipswap-swatch--add", {
+                    "chipswap-swatch--active": picker,
                   })}
-                  key={`${colour}-${index}`}
-                  onClick={() => setEditor(selectColor(editor, index))}
-                  style={{ background: colour, color: contrastColor(colour) }}
-                  title={colour}
+                  onClick={() => setPicker((open) => !open)}
+                  title="Add a colour"
                   type="button"
                 >
-                  {index}
+                  +
                 </button>
-              ))}
+              </div>
+              {picker ? (
+                <div className="chipswap-picker" id="chipswap-picker">
+                  {full ? (
+                    <p className="nt-meta">
+                      The palette is full at {MAX_PALETTE} colours. Remove one to
+                      make room.
+                    </p>
+                  ) : null}
+                  <div className="nt-cluster">
+                    <input
+                      aria-label="New colour"
+                      className="chipswap-color-input"
+                      onChange={(event) => setNewColor(event.currentTarget.value)}
+                      type="color"
+                      value={newColor}
+                    />
+                    <button
+                      className="nt-button nt-button--sm"
+                      disabled={full}
+                      onClick={() => setEditor(addPaletteColor(editor, newColor))}
+                      style={{ background: newColor, color: contrastColor(newColor) }}
+                      type="button"
+                    >
+                      Add {newColor}
+                    </button>
+                  </div>
+                  <div className="chipswap-blend">
+                    <span className="nt-meta">Or blend two palette colours</span>
+                    <label className="nt-field">
+                      <span className="nt-label">From</span>
+                      <select
+                        className="nt-select"
+                        onChange={(event) => setBlendFrom(Number(event.currentTarget.value))}
+                        value={blendFrom}
+                      >
+                        {editor.palette.map((colour, index) => (
+                          <option key={index} value={index}>
+                            {index}: {colour}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="nt-field">
+                      <span className="nt-label">To</span>
+                      <select
+                        className="nt-select"
+                        onChange={(event) => setBlendTo(Number(event.currentTarget.value))}
+                        value={blendTo}
+                      >
+                        {editor.palette.map((colour, index) => (
+                          <option key={index} value={index}>
+                            {index}: {colour}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <label className="nt-field">
+                      <span className="nt-label">
+                        Mix: {Math.round(blendRatio * 100)}%
+                      </span>
+                      <input
+                        className="chipswap-range"
+                        max={1}
+                        min={0}
+                        onChange={(event) => setBlendRatio(Number(event.currentTarget.value))}
+                        step={0.05}
+                        type="range"
+                        value={blendRatio}
+                      />
+                    </label>
+                    {(() => {
+                      const from = editor.palette[blendFrom] ?? "#000000";
+                      const to = editor.palette[blendTo] ?? "#ffffff";
+                      const blended = blendColors(from, to, blendRatio);
+                      return (
+                        <button
+                          className="nt-button nt-button--sm"
+                          disabled={full}
+                          onClick={() => setEditor(addPaletteColor(editor, blended))}
+                          style={{ background: blended, color: contrastColor(blended) }}
+                          type="button"
+                        >
+                          Add {blended}
+                        </button>
+                      );
+                    })()}
+                  </div>
+                </div>
+              ) : null}
             </div>
             <div className="nt-cluster">
-              <input
-                aria-label="New colour"
-                className="chipswap-color-input"
-                onChange={(event) => setNewColor(event.currentTarget.value)}
-                type="color"
-                value={newColor}
-              />
-              <button
-                className="nt-button nt-button--sm"
-                onClick={() => setEditor(addPaletteColor(editor, newColor))}
-                type="button"
-              >
-                Add colour
-              </button>
               <button
                 className="nt-button nt-button--ghost nt-button--sm"
                 disabled={!canRemovePaletteColor(editor, editor.activeColor)}
@@ -597,63 +711,8 @@ export const Studio = ({ status, onChanged }: Props) => {
                 }
                 type="button"
               >
-                Remove
+                Remove colour {editor.activeColor}
               </button>
-            </div>
-          </section>
-
-          <section className="nt-section">
-            <h3 className="nt-section-title">Blend</h3>
-            <div className="nt-cluster chipswap-blend">
-              <select
-                aria-label="Blend from"
-                className="nt-select"
-                onChange={(event) => setBlendFrom(Number(event.currentTarget.value))}
-                value={blendFrom}
-              >
-                {editor.palette.map((colour, index) => (
-                  <option key={index} value={index}>
-                    {index}: {colour}
-                  </option>
-                ))}
-              </select>
-              <select
-                aria-label="Blend to"
-                className="nt-select"
-                onChange={(event) => setBlendTo(Number(event.currentTarget.value))}
-                value={blendTo}
-              >
-                {editor.palette.map((colour, index) => (
-                  <option key={index} value={index}>
-                    {index}: {colour}
-                  </option>
-                ))}
-              </select>
-              <input
-                aria-label="Blend ratio"
-                className="chipswap-range"
-                max={1}
-                min={0}
-                onChange={(event) => setBlendRatio(Number(event.currentTarget.value))}
-                step={0.05}
-                type="range"
-                value={blendRatio}
-              />
-              {(() => {
-                const from = editor.palette[blendFrom] ?? "#000000";
-                const to = editor.palette[blendTo] ?? "#ffffff";
-                const blended = blendColors(from, to, blendRatio);
-                return (
-                  <button
-                    className="nt-button nt-button--sm"
-                    onClick={() => setEditor(addPaletteColor(editor, blended))}
-                    style={{ background: blended, color: contrastColor(blended) }}
-                    type="button"
-                  >
-                    Add {blended}
-                  </button>
-                );
-              })()}
             </div>
           </section>
 
