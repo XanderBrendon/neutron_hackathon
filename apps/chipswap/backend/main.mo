@@ -121,6 +121,11 @@ module {
         minted_count : Nat;
     };
 
+    // `origin` is "held" for a chip that came in through a trade and "design"
+    // for one of our own published designs, which the collection carries even
+    // though it is not a holding. A "design" row has no serial and no trade to
+    // settle; `minted_count` is how many of it are out in the world, and is 0
+    // on anything held.
     public type ChipView = {
         key : Text;
         designer : Text;
@@ -136,6 +141,8 @@ module {
         peer : ?Text;
         request_id : ?Text;
         contact_name : ?Text;
+        origin : Text;
+        minted_count : Nat;
     };
 
     public type StatusView = {
@@ -532,11 +539,36 @@ module {
             };
         };
 
+        // Our own published designs lead the collection, in slot order, ahead of
+        // everything we collected. They are not holdings — publishing spends no
+        // slot and mints nothing for us — so they are read straight off
+        // `mem.designs` here rather than stored, which is also why a design
+        // published before this existed shows up without a migration. Drafts
+        // stay out: `Designs.published` filters them, and a design nobody could
+        // hold is not a chip.
         public func /*query*/chipswap_collection(request : PageRequest) : CollectionPage {
-            let page = Holdings.page(mem, request.offset, boundedLimit(request.limit));
+            let limit = boundedLimit(request.limit);
+            let designs = Designs.published(mem);
+            let leading : Nat = if (request.offset < designs.size()) {
+                let available : Nat = designs.size() - request.offset;
+                if (limit < available) limit else available;
+            } else 0;
+            // Holdings resume where the designs left off, so one window can
+            // straddle the two and neither is ever skipped.
+            let heldOffset : Nat = if (request.offset > designs.size()) {
+                request.offset - designs.size();
+            } else 0;
+            let held = Holdings.page(mem, heldOffset, limit - leading);
             {
-                chips = Array.map<Memory.Chip, ChipView>(page.chips, chipView);
-                total = page.total;
+                chips = Array.tabulate<ChipView>(
+                    leading + held.chips.size(),
+                    func(i) {
+                        if (i < leading) designChipView(designs[request.offset + i]) else chipView(
+                            held.chips[i - leading]
+                        );
+                    },
+                );
+                total = designs.size() + held.total;
             };
         };
 
@@ -1546,6 +1578,39 @@ module {
             };
         };
 
+        // One of our own published designs, dressed as a chip. Serial 0 is the
+        // tell: minted serials start at 1, so the key can never collide with a
+        // holding, and there is no instance here to point at anyway. Nothing is
+        // in flight, so there is no peer and no request to settle.
+        func designChipView(design : Memory.Design) : ChipView {
+            let published = switch (design.published_at_ns) {
+                case (?value) value;
+                case null design.created_at_ns;
+            };
+            {
+                key = Holdings.key({
+                    designer = self;
+                    design_id = design.design_id;
+                    serial = 0;
+                });
+                designer = Principal.toText(self);
+                design_id = design.design_id;
+                serial = 0;
+                title = design.title;
+                art = artView(design.art);
+                nsfw = design.nsfw;
+                design_revision = design.revision;
+                minted_at_ns = published;
+                acquired_at_ns = published;
+                state = "held";
+                peer = null;
+                request_id = null;
+                contact_name = null;
+                origin = "design";
+                minted_count = design.next_serial - 1;
+            };
+        };
+
         func chipView(chip : Memory.Chip) : ChipView {
             let (state, peer, requestId) = switch (chip.state) {
                 case (#held) ("held", null : ?Text, null : ?Text);
@@ -1575,6 +1640,8 @@ module {
                 peer;
                 request_id = requestId;
                 contact_name = contactName(chip.ref.designer);
+                origin = "held";
+                minted_count = 0;
             };
         };
 

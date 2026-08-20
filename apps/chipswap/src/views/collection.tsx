@@ -71,7 +71,7 @@ export const Collection = ({ status, onChanged }: Props) => {
         <h2 className="nt-section-heading">Collection</h2>
         <span className="nt-section-count">
           {total} chip{total === 1 ? "" : "s"}
-          {status ? ` · limit ${status.holdingsLimit}` : ""}
+          {status ? ` · ${status.holdings} of ${status.holdingsLimit} held` : ""}
         </span>
       </header>
 
@@ -89,58 +89,78 @@ export const Collection = ({ status, onChanged }: Props) => {
         </p>
       ) : (
         <ul className="chipswap-grid">
-          {chips.map((chip) => (
-            <li className="nt-card chipswap-chip-card" key={chip.key}>
-              <ChipCanvas
-                label={`${chip.title} by ${shortPrincipal(chip.designer)}`}
-                palette={chip.art.palette}
-                pixels={decodePixels(chip.art.pixels)}
-                scale={4}
-              />
-              <div className="chipswap-chip-meta">
-                <strong>{chip.title}</strong>
-                <span className="nt-meta">
-                  #{chip.serial} · design {chip.designId}
-                </span>
-                {chip.nsfw ? (
-                  <span className="nt-tag nt-tag--warning">NSFW</span>
-                ) : null}
-                <span className="nt-meta" title={chip.designer}>
-                  {chip.contactName ?? shortPrincipal(chip.designer)}
-                </span>
-                <span className="nt-meta">{formatTimestamp(chip.acquiredAtNs)}</span>
-                <span
-                  className={cx("nt-tag", {
-                    "nt-tag--warning": chip.state === "escrowed",
-                    "nt-tag--danger": chip.state === "uncertain",
-                  })}
-                >
-                  {STATE_LABEL[chip.state]}
-                </span>
-                {chip.state === "uncertain" ? (
-                  <>
-                    <p className="nt-help">
-                      The other Neutron never confirmed this trade. Ask it what
-                      happened before offering this chip again.
-                    </p>
-                    <button
-                      className="nt-button nt-button--sm"
-                      disabled={busy}
-                      onClick={() => void handleResolve(chip)}
-                      type="button"
-                    >
-                      Ask the designer
-                    </button>
-                  </>
-                ) : null}
-                {chip.state === "escrowed" && chip.peer ? (
-                  <span className="nt-meta" title={chip.peer}>
-                    waiting on {shortPrincipal(chip.peer)}
+          {chips.map((chip) => {
+            // Our own published designs come back in this page too. They are
+            // not holdings: there is no serial to show, nobody to credit but
+            // us, and no trade to settle.
+            const own = chip.origin === "design";
+            return (
+              <li className="nt-card chipswap-chip-card" key={chip.key}>
+                <ChipCanvas
+                  label={
+                    own
+                      ? `${chip.title}, your design`
+                      : `${chip.title} by ${shortPrincipal(chip.designer)}`
+                  }
+                  palette={chip.art.palette}
+                  pixels={decodePixels(chip.art.pixels)}
+                  scale={4}
+                />
+                <div className="chipswap-chip-meta">
+                  <strong>{chip.title}</strong>
+                  <span className="nt-meta">
+                    {own ? null : <>#{chip.serial} · </>}design {chip.designId}
                   </span>
-                ) : null}
-              </div>
-            </li>
-          ))}
+                  {chip.nsfw ? (
+                    <span className="nt-tag nt-tag--warning">NSFW</span>
+                  ) : null}
+                  {own ? (
+                    <span className="nt-meta">{chip.mintedCount} minted</span>
+                  ) : (
+                    <span className="nt-meta" title={chip.designer}>
+                      {chip.contactName ?? shortPrincipal(chip.designer)}
+                    </span>
+                  )}
+                  <span className="nt-meta">
+                    {formatTimestamp(chip.acquiredAtNs)}
+                  </span>
+                  {own ? (
+                    <span className="nt-tag">Your design</span>
+                  ) : (
+                    <span
+                      className={cx("nt-tag", {
+                        "nt-tag--warning": chip.state === "escrowed",
+                        "nt-tag--danger": chip.state === "uncertain",
+                      })}
+                    >
+                      {STATE_LABEL[chip.state]}
+                    </span>
+                  )}
+                  {chip.state === "uncertain" ? (
+                    <>
+                      <p className="nt-help">
+                        The other Neutron never confirmed this trade. Ask it what
+                        happened before offering this chip again.
+                      </p>
+                      <button
+                        className="nt-button nt-button--sm"
+                        disabled={busy}
+                        onClick={() => void handleResolve(chip)}
+                        type="button"
+                      >
+                        Ask the designer
+                      </button>
+                    </>
+                  ) : null}
+                  {chip.state === "escrowed" && chip.peer ? (
+                    <span className="nt-meta" title={chip.peer}>
+                      waiting on {shortPrincipal(chip.peer)}
+                    </span>
+                  ) : null}
+                </div>
+              </li>
+            );
+          })}
         </ul>
       )}
 

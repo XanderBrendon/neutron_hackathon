@@ -135,6 +135,33 @@ switch (
     case (#err(error)) Runtime.trap("publish: " # error.code);
 };
 
+// Publishing puts the design in our own collection. It is not a holding — no
+// slot is spent, and there is nothing to trade away — but it is ours, so it
+// leads the page ahead of anything we collected.
+let ownDesigns = chipswap.chipswap_collection({ offset = 0; limit = 10 });
+assert (ownDesigns.total == 1);
+assert (ownDesigns.chips[0].origin == "design");
+assert (ownDesigns.chips[0].designer == Principal.toText(self));
+assert (ownDesigns.chips[0].design_id == 1);
+assert (ownDesigns.chips[0].serial == 0);
+assert (ownDesigns.chips[0].minted_count == 0);
+assert (ownDesigns.chips[0].state == "held");
+assert (ownDesigns.chips[0].peer == null);
+assert (ownDesigns.chips[0].request_id == null);
+assert (chipswap.chipswap_status(()).holdings == 0);
+
+// A draft is not a chip. Only what has been published shows up, because only
+// that is something a peer could ever hold.
+switch (chipswap.chipswap_draft_create({ title = "Unfinished" })) {
+    case (#ok(_)) {};
+    case (#err(error)) Runtime.trap("draft: " # error.code);
+};
+assert (chipswap.chipswap_collection({ offset = 0; limit = 10 }).total == 1);
+switch (chipswap.chipswap_draft_delete({ design_id = 2 })) {
+    case (#ok(_)) {};
+    case (#err(error)) Runtime.trap("draft_delete: " # error.code);
+};
+
 // A requirement that restricts nothing is refused, and so is a rule that is
 // not one of the three.
 switch (
@@ -212,12 +239,30 @@ let mintedSerial = switch (tradeReply) {
 };
 assert (mintedSerial == 1);
 
-// Their chip is in our collection, and the peer is in our directory.
+// Their chip is in our collection, and the peer is in our directory. Our own
+// design still leads: the chip we just took in sits behind it.
 let collection = chipswap.chipswap_collection({ offset = 0; limit = 10 });
-assert (collection.total == 1);
-assert (collection.chips[0].designer == Principal.toText(peer));
-assert (collection.chips[0].state == "held");
-assert (collection.chips[0].serial == 8);
+assert (collection.total == 2);
+assert (collection.chips[0].origin == "design");
+assert (collection.chips[0].design_id == 1);
+// Minting for the peer is the one thing that moves an own design's counter.
+assert (collection.chips[0].minted_count == 1);
+assert (collection.chips[1].origin == "held");
+assert (collection.chips[1].designer == Principal.toText(peer));
+assert (collection.chips[1].state == "held");
+assert (collection.chips[1].serial == 8);
+assert (collection.chips[1].minted_count == 0);
+
+// Paging counts both kinds in one sequence, so a window can straddle them.
+let firstOnly = chipswap.chipswap_collection({ offset = 0; limit = 1 });
+assert (firstOnly.total == 2);
+assert (firstOnly.chips.size() == 1);
+assert (firstOnly.chips[0].origin == "design");
+let heldOnly = chipswap.chipswap_collection({ offset = 1; limit = 1 });
+assert (heldOnly.total == 2);
+assert (heldOnly.chips.size() == 1);
+assert (heldOnly.chips[0].origin == "held");
+assert (chipswap.chipswap_collection({ offset = 2; limit = 10 }).chips.size() == 0);
 let directory = chipswap.chipswap_directory({ offset = 0; limit = 10 });
 assert (directory.total == 1);
 assert (directory.entries[0].canister == Principal.toText(peer));
@@ -247,7 +292,7 @@ switch (replayReply) {
     case (#minted(payload)) assert (payload.chip.serial == mintedSerial);
     case (_) Runtime.trap("expected a replayed mint");
 };
-assert (chipswap.chipswap_collection({ offset = 0; limit = 10 }).total == 1);
+assert (chipswap.chipswap_collection({ offset = 0; limit = 10 }).total == 2);
 
 // The status route answers the proposer's later question.
 let statusBytes = chipswap.chipswap_status_v1({ request_id = requestId }, peer);

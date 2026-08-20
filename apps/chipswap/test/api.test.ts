@@ -42,6 +42,8 @@ const CHIP = {
   minted_at_ns: "1700000000000000000",
   acquired_at_ns: "1700000000000000001",
   state: "held",
+  origin: "held",
+  minted_count: "0",
 };
 
 test("Nat values arrive as decimal strings", () => {
@@ -171,6 +173,25 @@ test("chips carry their trade state and optional escrow details", () => {
   expect(escrowed.contactName).toBe("Ada");
 
   expect(() => parseChip({ ...CHIP, state: "gone" })).toThrow();
+});
+
+test("a chip knows whether it was collected or is one of our own designs", () => {
+  const held = parseChip(CHIP);
+  expect(held.origin).toBe("held");
+  expect(held.mintedCount).toBe(0);
+
+  const own = parseChip({
+    ...CHIP,
+    key: "aaaaa-aa.1.0",
+    serial: "0",
+    origin: "design",
+    minted_count: "7",
+  });
+  expect(own.origin).toBe("design");
+  expect(own.serial).toBe(0);
+  expect(own.mintedCount).toBe(7);
+
+  expect(() => parseChip({ ...CHIP, origin: "borrowed" })).toThrow();
 });
 
 test("status reports the geometry the editor draws with", () => {

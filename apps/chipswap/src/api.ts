@@ -47,6 +47,10 @@ export type Design = {
 
 export type ChipState = "held" | "escrowed" | "uncertain";
 
+// A chip is either one we collected or one of our own published designs, which
+// the collection carries without it ever being a holding.
+export type ChipOrigin = "held" | "design";
+
 export type Chip = {
   key: string;
   designer: string;
@@ -62,6 +66,8 @@ export type Chip = {
   peer: string | null;
   requestId: string | null;
   contactName: string | null;
+  origin: ChipOrigin;
+  mintedCount: number;
 };
 
 export type Status = {
@@ -345,6 +351,8 @@ export function parseChip(value: unknown): Chip {
     peer: optionalText(source.peer, "chip peer"),
     requestId: optionalText(source.request_id, "request id"),
     contactName: optionalText(source.contact_name, "contact name"),
+    origin: oneOf(source.origin, ["held", "design"] as const, "chip origin"),
+    mintedCount: natNumber(source.minted_count, "minted count"),
   };
 }
 
