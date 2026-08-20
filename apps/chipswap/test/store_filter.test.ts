@@ -42,7 +42,7 @@ test("the four axes offer exactly the documented choices", () => {
   expect(NSFW_OPTIONS.map((option) => option.value)).toEqual(["hide", "show"]);
 });
 
-test("serialisation uses the backend field names", () => {
+test("serialization uses the backend field names", () => {
   expect(
     serializeFilter({
       ownership: "owned",

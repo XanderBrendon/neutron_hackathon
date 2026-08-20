@@ -7,14 +7,14 @@ import {
   parseHexColor,
 } from "../src/palette.ts";
 
-test("hex colours parse and format symmetrically", () => {
+test("hex colors parse and format symmetrically", () => {
   expect(parseHexColor("#7fd1c1")).toEqual({ r: 0x7f, g: 0xd1, b: 0xc1 });
   expect(formatHexColor({ r: 0x7f, g: 0xd1, b: 0xc1 })).toBe("#7fd1c1");
   expect(formatHexColor({ r: 0, g: 0, b: 0 })).toBe("#000000");
   expect(formatHexColor(parseHexColor("#000000"))).toBe("#000000");
 });
 
-test("malformed colours are rejected, never guessed", () => {
+test("malformed colors are rejected, never guessed", () => {
   expect(() => parseHexColor("#gg0000")).toThrow();
   expect(() => parseHexColor("7fd1c1")).toThrow();
   expect(() => parseHexColor("#7fd1c")).toThrow();
@@ -24,12 +24,12 @@ test("malformed colours are rejected, never guessed", () => {
   expect(isHexColor("rebeccapurple")).toBe(false);
 });
 
-test("blending walks the straight line between two colours", () => {
+test("blending walks the straight line between two colors", () => {
   expect(blendColors("#000000", "#ffffff", 0.5)).toBe("#808080");
   expect(blendColors("#ff0000", "#0000ff", 0)).toBe("#ff0000");
   expect(blendColors("#ff0000", "#0000ff", 1)).toBe("#0000ff");
   expect(blendColors("#ff0000", "#0000ff", 0.5)).toBe("#800080");
-  // Out-of-range ratios clamp rather than producing an impossible colour.
+  // Out-of-range ratios clamp rather than producing an impossible color.
   expect(blendColors("#ff0000", "#0000ff", -1)).toBe("#ff0000");
   expect(blendColors("#ff0000", "#0000ff", 2)).toBe("#0000ff");
 });

@@ -1,11 +1,11 @@
 // Stamping an image onto a chip. A chip is 31 pixels across, so nearly all of a
-// photograph has to go: what survives is one colour per chip pixel, averaged
+// photograph has to go: what survives is one color per chip pixel, averaged
 // from every image pixel that lands inside it, and a palette small enough to
-// store. The image's own colours are reduced to a budget the caller sets, which
-// is what lets a stamp land in a chip that already has colours of its own.
+// store. The image's own colors are reduced to a budget the caller sets, which
+// is what lets a stamp land in a chip that already has colors of its own.
 //
 // Nothing here touches the DOM. The caller decodes the image and hands over a
-// plain raster, which is what keeps the sampling and the colour reduction
+// plain raster, which is what keeps the sampling and the color reduction
 // testable outside a browser.
 
 import { DIAMETER, PIXEL_COUNT, pixelPosition } from "./chip.ts";
@@ -41,7 +41,7 @@ export type StampTarget = {
 export type Stamp = {
   pixels: Uint8Array;
   palette: string[];
-  /** How many colours the stamp brought into the palette. */
+  /** How many colors the stamp brought into the palette. */
   added: number;
 };
 
@@ -49,7 +49,7 @@ const EMPTY_PLACEMENT: Placement = { left: 0, top: 0, width: 0, height: 0 };
 
 // Anything this transparent counts as absent rather than as black, so a logo on
 // a transparent background leaves the chip showing through instead of sooting
-// it: averaging in an unpainted pixel would drag the colour towards nothing.
+// it: averaging in an unpainted pixel would drag the color toward nothing.
 const MIN_ALPHA = 128;
 
 const CHANNELS = ["r", "g", "b"] as const;
@@ -57,7 +57,7 @@ const CHANNELS = ["r", "g", "b"] as const;
 type Channel = (typeof CHANNELS)[number];
 
 /**
- * The image scaled to cover the whole chip, centred, then zoomed and nudged.
+ * The image scaled to cover the whole chip, centered, then zoomed and nudged.
  * Cover rather than contain: at zoom 1 the chip is full, and zooming out is how
  * you ask for margins.
  */
@@ -79,10 +79,10 @@ export function coverPlacement(
   };
 }
 
-/** First image row or column whose centre falls at or after `edge`. */
+/** First image row or column whose center falls at or after `edge`. */
 const firstCovered = (edge: number) => Math.max(0, Math.ceil(edge - 0.5));
 
-/** Last one whose centre falls before `edge`, clamped to the raster. */
+/** Last one whose center falls before `edge`, clamped to the raster. */
 const lastCovered = (edge: number, limit: number) =>
   Math.min(limit - 1, Math.ceil(edge - 0.5) - 1);
 
@@ -112,7 +112,7 @@ function averageRegion(
   if (count > 0) return { r: red / count, g: green / count, b: blue / count };
 
   // Zoomed in far enough, a chip pixel sits inside a single image pixel and
-  // contains no pixel centre at all. It takes the colour under its own centre
+  // contains no pixel center at all. It takes the color under its own center
   // rather than nothing, so magnifying a picture keeps stamping it.
   const x = Math.floor((x0 + x1) / 2);
   const y = Math.floor((y0 + y1) / 2);
@@ -127,9 +127,9 @@ function averageRegion(
 }
 
 /**
- * One average colour per chip pixel, or null where the image does not reach —
+ * One average color per chip pixel, or null where the image does not reach —
  * off the edge of the picture, or over a transparent part of it. A null pixel
- * is not a colour to choose, it is a pixel the stamp leaves alone.
+ * is not a color to choose, it is a pixel the stamp leaves alone.
  */
 export function sampleChip(
   raster: Raster,
@@ -158,9 +158,9 @@ export function sampleChip(
 function spread(box: Rgb[], channel: Channel): number {
   let low = Infinity;
   let high = -Infinity;
-  for (const colour of box) {
-    if (colour[channel] < low) low = colour[channel];
-    if (colour[channel] > high) high = colour[channel];
+  for (const color of box) {
+    if (color[channel] < low) low = color[channel];
+    if (color[channel] > high) high = color[channel];
   }
   return high - low;
 }
@@ -169,23 +169,23 @@ function average(box: Rgb[]): Rgb {
   let red = 0;
   let green = 0;
   let blue = 0;
-  for (const colour of box) {
-    red += colour.r;
-    green += colour.g;
-    blue += colour.b;
+  for (const color of box) {
+    red += color.r;
+    green += color.g;
+    blue += color.b;
   }
   return { r: red / box.length, g: green / box.length, b: blue / box.length };
 }
 
 /**
- * Median cut: the colours are held in one box, which is split at its median
+ * Median cut: the colors are held in one box, which is split at its median
  * along its widest channel until there are `max` boxes, and each box collapses
- * to its average. It keeps a colour that only a corner of the picture depends
- * on, which picking the commonest colours does not.
+ * to its average. It keeps a color that only a corner of the picture depends
+ * on, which picking the commonest colors does not.
  */
-export function quantise(colours: Rgb[], max: number): Rgb[] {
-  if (max < 1 || colours.length === 0) return [];
-  let boxes: Rgb[][] = [colours];
+export function quantize(colors: Rgb[], max: number): Rgb[] {
+  if (max < 1 || colors.length === 0) return [];
+  let boxes: Rgb[][] = [colors];
   while (boxes.length < max) {
     let target = -1;
     let widest = 0;
@@ -200,7 +200,7 @@ export function quantise(colours: Rgb[], max: number): Rgb[] {
         along = channel;
       }
     }
-    // Every box left holds one colour, or many copies of one: nothing to split.
+    // Every box left holds one color, or many copies of one: nothing to split.
     if (target < 0) break;
     const sorted = [...boxes[target]!].sort((left, right) => left[along] - right[along]);
     const middle = Math.floor(sorted.length / 2);
@@ -212,31 +212,31 @@ export function quantise(colours: Rgb[], max: number): Rgb[] {
     ];
   }
 
-  // Two boxes can average to the same colour, and a palette has no use for the
-  // same colour twice.
+  // Two boxes can average to the same color, and a palette has no use for the
+  // same color twice.
   const seen = new Set<string>();
   const reduced: Rgb[] = [];
   for (const box of boxes) {
-    const colour = average(box);
-    const hex = formatHexColor(colour);
+    const color = average(box);
+    const hex = formatHexColor(color);
     if (seen.has(hex)) continue;
     seen.add(hex);
-    reduced.push(colour);
+    reduced.push(color);
   }
   return reduced;
 }
 
 /**
- * Nearest palette colour by weighted distance. The weights are the usual cheap
+ * Nearest palette color by weighted distance. The weights are the usual cheap
  * stand-in for how the eye reads the channels: green counts most, blue least.
  */
-function nearestIndex(palette: Rgb[], colour: Rgb): number {
+function nearestIndex(palette: Rgb[], color: Rgb): number {
   let best = 0;
   let closest = Infinity;
   for (const [index, entry] of palette.entries()) {
-    const dr = entry.r - colour.r;
-    const dg = entry.g - colour.g;
-    const db = entry.b - colour.b;
+    const dr = entry.r - color.r;
+    const dg = entry.g - color.g;
+    const db = entry.b - color.b;
     const distance = dr * dr * 2 + dg * dg * 4 + db * db * 3;
     if (distance >= closest) continue;
     closest = distance;
@@ -247,11 +247,11 @@ function nearestIndex(palette: Rgb[], colour: Rgb): number {
 
 /**
  * The chip an image would leave behind. `budget` is how many of the image's own
- * colours may join the palette; at zero the picture is approximated with the
- * colours the chip already has.
+ * colors may join the palette; at zero the picture is approximated with the
+ * colors the chip already has.
  *
  * Locked pixels are left out of both halves of the work: they keep their
- * colour, and their samples take no part in the reduction, so the whole budget
+ * color, and their samples take no part in the reduction, so the whole budget
  * is spent on the pixels the stamp can actually reach.
  */
 export function buildStamp(
@@ -268,19 +268,19 @@ export function buildStamp(
 
   const palette = [...chip.palette];
   const room = Math.max(0, MAX_PALETTE - palette.length);
-  const wanted = quantise(
+  const wanted = quantize(
     writable.map((index) => samples[index]!),
     Math.min(budget, room),
   );
-  for (const colour of wanted) {
-    const hex = formatHexColor(colour);
+  for (const color of wanted) {
+    const hex = formatHexColor(color);
     if (!palette.includes(hex)) palette.push(hex);
   }
 
-  const colours = palette.map(parseHexColor);
+  const colors = palette.map(parseHexColor);
   const pixels = Uint8Array.from(chip.pixels);
   for (const index of writable) {
-    pixels[index] = nearestIndex(colours, samples[index]!);
+    pixels[index] = nearestIndex(colors, samples[index]!);
   }
   return { pixels, palette, added: palette.length - chip.palette.length };
 }

@@ -287,16 +287,16 @@ export function parseArt(value: unknown): Art {
   if (!Array.isArray(palette) || palette.length === 0) {
     throw new Error("Invalid chip palette");
   }
-  const colours = palette.map((entry) => {
-    const colour = text(entry, "palette colour");
-    if (!isHexColor(colour)) throw new Error("Invalid palette colour");
-    return colour;
+  const colors = palette.map((entry) => {
+    const color = text(entry, "palette color");
+    if (!isHexColor(color)) throw new Error("Invalid palette color");
+    return color;
   });
   const pixels = text(source.pixels, "chip pixels");
   if (pixels.length !== PIXEL_COUNT * 2) throw new Error("Invalid chip pixels");
   return {
     shapeId: text(source.shape_id, "chip shape"),
-    palette: colours,
+    palette: colors,
     pixels,
   };
 }
@@ -305,7 +305,7 @@ export function parseRequirements(value: unknown): TradeRequirements {
   const source = record(value, "trade requirements");
   return {
     approval: bool(source.approval, "approval flag"),
-    minColors: optionalNat(source.min_colors, "colour minimum"),
+    minColors: optionalNat(source.min_colors, "color minimum"),
     maxCoverage: optionalNat(source.max_coverage, "coverage cap"),
     nsfw: oneOf(
       source.nsfw,

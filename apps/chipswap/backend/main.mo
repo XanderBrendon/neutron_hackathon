@@ -397,7 +397,7 @@ module {
         minted_at_ns : Int;
     };
 
-    // A catalogue read asks for nothing but the catalogue. It used to carry a
+    // A catalog read asks for nothing but the catalog. It used to carry a
     // directory, and the reply used to carry one back; discovery is its own
     // request now.
     public type PeerCatalogRequest = {};
@@ -1104,7 +1104,7 @@ module {
                         List.add(fetched, Principal.toText(target));
                     };
                     case null {
-                        // A catalogue read is one of the three calls a live peer
+                        // A catalog read is one of the three calls a live peer
                         // always answers, so a rejection here is evidence about
                         // the peer rather than about the message. Unreadable
                         // bytes are not: that call was answered.
@@ -1264,7 +1264,7 @@ module {
         // --- Peer routes ------------------------------------------------------
 
         public func /*update*/chipswap_catalog_v1(
-            // Reading a catalogue no longer puts the reader in our directory.
+            // Reading a catalog no longer puts the reader in our directory.
             // Browsing is not a relationship, and a designer who wants to be
             // known to us can propose a trade, which is.
             request : PeerCatalogRequest,
@@ -1627,7 +1627,7 @@ module {
     func artView(art : Memory.Art) : ArtView {
         {
             shape_id = art.shape_id;
-            palette = Array.map<Nat32, Text>(art.palette, colourText);
+            palette = Array.map<Nat32, Text>(art.palette, colorText);
             pixels = Trades.hex(art.pixels);
         };
     };
@@ -1637,8 +1637,8 @@ module {
         "8", "9", "a", "b", "c", "d", "e", "f",
     ];
 
-    func colourText(colour : Nat32) : Text {
-        var value = Nat32.toNat(colour) % 16_777_216;
+    func colorText(color : Nat32) : Text {
+        var value = Nat32.toNat(color) % 16_777_216;
         var out = "";
         var index = 0;
         while (index < 6) {
@@ -1649,7 +1649,7 @@ module {
         "#" # out;
     };
 
-    func parseColour(value : Text) : ?Nat32 {
+    func parseColor(value : Text) : ?Nat32 {
         let characters = Text.toArray(value);
         if (characters.size() != 7) return null;
         if (characters[0] != '#') return null;
@@ -1688,12 +1688,12 @@ module {
     func parsePalette(palette : [Text]) : { #ok : [Nat32]; #err : Text } {
         if (palette.size() == 0) return #err("palette_empty");
         if (palette.size() > Shape.MAX_PALETTE) return #err("palette_limit");
-        let colours = List.empty<Nat32>();
+        let colors = List.empty<Nat32>();
         for (entry in palette.values()) {
-            let ?colour = parseColour(entry) else return #err("palette_invalid");
-            List.add(colours, colour);
+            let ?color = parseColor(entry) else return #err("palette_invalid");
+            List.add(colors, color);
         };
-        #ok(List.toArray(colours));
+        #ok(List.toArray(colors));
     };
 
     func parsePixels(pixels : Text) : { #ok : Blob; #err : Text } {
@@ -1751,10 +1751,10 @@ module {
             case ("immutable") "A published design cannot be changed.";
             case ("revision_conflict") "This design changed since it was loaded.";
             case ("title_invalid") "Titles are 1 to 48 characters.";
-            case ("palette_empty") "A chip needs at least one colour.";
-            case ("palette_limit") "A palette holds at most 64 colours.";
-            case ("palette_invalid") "Colours must look like #rrggbb.";
-            case ("palette_index") "A pixel refers to a colour that is not in the palette.";
+            case ("palette_empty") "A chip needs at least one color.";
+            case ("palette_limit") "A palette holds at most 64 colors.";
+            case ("palette_invalid") "Colors must look like #rrggbb.";
+            case ("palette_index") "A pixel refers to a color that is not in the palette.";
             case ("pixel_count") "A chip has exactly 757 pixels.";
             case ("pixels_invalid") "Pixel data must be lowercase hexadecimal.";
             case ("shape_unsupported") "That chip shape is not supported.";
@@ -1781,10 +1781,10 @@ module {
             case ("principal_invalid") "That is not a valid principal.";
             case ("principal_not_canister") "A Chipswap address is a canister principal.";
             case ("too_many_targets") "Refresh at most eight designers at a time.";
-            case ("requirements_invalid") "A colour minimum is 2 to 64, and a coverage cap is 1 to 99 percent.";
+            case ("requirements_invalid") "A color minimum is 2 to 64, and a coverage cap is 1 to 99 percent.";
             case ("nsfw_rule_invalid") "The NSFW rule is any, disallowed, or required.";
-            case ("min_colors") "That chip does not use enough colours for this design.";
-            case ("max_coverage") "One colour covers too much of that chip for this design.";
+            case ("min_colors") "That chip does not use enough colors for this design.";
+            case ("max_coverage") "One color covers too much of that chip for this design.";
             case ("nsfw_disallowed") "This design does not accept chips tagged NSFW.";
             case ("nsfw_required") "This design only accepts chips tagged NSFW.";
             case ("brush_invalid") "That brush shape is not valid.";

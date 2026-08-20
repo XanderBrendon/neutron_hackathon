@@ -39,7 +39,7 @@ assert (Shape.indexOf(1, 0) == ?9);
 assert (Shape.indexOf(31, 0) == null);
 assert (Shape.indexOf(30, 8) == ?756);
 
-// Chip-local column coordinates are centred: row 0 spans columns 11..19.
+// Chip-local column coordinates are centered: row 0 spans columns 11..19.
 assert (Shape.indexAt(11, 0) == ?0);
 assert (Shape.indexAt(19, 0) == ?8);
 assert (Shape.indexAt(10, 0) == null);

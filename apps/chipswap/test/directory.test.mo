@@ -283,7 +283,7 @@ let servedAfter = Directory.served(ignoring, self, 0, 10);
 assert (servedAfter.total == 1);
 assert (servedAfter.entries[0] == alice);
 
-// Un-ignoring restores the entry, not the catalogue: the store stays quiet
+// Un-ignoring restores the entry, not the catalog: the store stays quiet
 // until the next refresh actually fetches something.
 assert (Directory.setIgnored(ignoring, bob, false));
 assert (Directory.ignored(ignoring, bob) == false);
@@ -292,7 +292,7 @@ assert (Directory.served(ignoring, self, 0, 10).total == 2);
 Directory.storeCatalog(ignoring, bob, [cachedDesign(1, OPEN, false)], 70);
 assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 2);
 
-// A catalogue cached before the flag is set is still not shown, so the store
+// A catalog cached before the flag is set is still not shown, so the store
 // never depends on the cache having been cleared by exactly one code path.
 Directory.storeCatalog(ignoring, bob, [cachedDesign(1, OPEN, false)], 80);
 Map.add(
@@ -379,7 +379,7 @@ assert (Directory.reachable(strikes, alice) == false);
 assert (Directory.get(strikes, alice) != null);
 assert (Directory.served(strikes, self, 0, 10).total == 0);
 
-// Retiring drops the cached catalogue, so the store does not keep showing chips
+// Retiring drops the cached catalog, so the store does not keep showing chips
 // from a designer nobody will ever refresh again.
 ignore Directory.note(strikes, bob, #manual, 1);
 Directory.storeCatalog(strikes, bob, [cachedDesign(1, OPEN, false)], 10);

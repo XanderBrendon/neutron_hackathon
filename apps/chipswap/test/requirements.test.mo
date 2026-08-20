@@ -40,26 +40,26 @@ func requirements(
 
 // --- measuring ------------------------------------------------------------
 
-// A chip painted in one colour is one colour, covering all of it.
+// A chip painted in one color is one color, covering all of it.
 let plain = Requirements.measure(artOf([Shape.PIXEL_COUNT]));
 assert (plain.colors == 1);
 assert (plain.top_color_pixels == Shape.PIXEL_COUNT);
 assert (plain.total_pixels == Shape.PIXEL_COUNT);
 
-// Three colours, the largest holding 400 of the 757.
+// Three colors, the largest holding 400 of the 757.
 let mixed = Requirements.measure(artOf([400, 300, 57]));
 assert (mixed.colors == 3);
 assert (mixed.top_color_pixels == 400);
 
-// A palette entry nothing paints is not a colour of this chip: padding the
-// palette is not a way to satisfy a colour minimum.
+// A palette entry nothing paints is not a color of this chip: padding the
+// palette is not a way to satisfy a color minimum.
 let padded = Requirements.measure({
     artOf([400, 357]) with
     palette = Array.tabulate<Nat32>(Shape.MAX_PALETTE, func(i) { Nat32.fromNat(i) })
 });
 assert (padded.colors == 2);
 
-// Two palette entries holding the same colour are one colour, and their pixels
+// Two palette entries holding the same color are one color, and their pixels
 // belong to it together.
 let duplicated = Requirements.measure({
     artOf([400, 300, 57]) with palette = [0x000000, 0x000000, 0x7fd1c1, 0x4f8ad8]
@@ -67,7 +67,7 @@ let duplicated = Requirements.measure({
 assert (duplicated.colors == 2);
 assert (duplicated.top_color_pixels == 700);
 
-// --- colour minimum -------------------------------------------------------
+// --- color minimum -------------------------------------------------------
 
 assert (Requirements.check(requirements(?3, null, null), mixed, false) == null);
 assert (Requirements.check(requirements(?4, null, null), mixed, false) == ?"min_colors");
@@ -100,14 +100,14 @@ assert (Requirements.check(requirements(null, null, null), mixed, true) == null)
 // --- combining ------------------------------------------------------------
 
 // The first requirement that fails is the one reported, in the order a designer
-// set them out: colours, then coverage, then the tag.
+// set them out: colors, then coverage, then the tag.
 assert (Requirements.check(requirements(?9, ?10, ? #required), mixed, false) == ?"min_colors");
 assert (Requirements.check(requirements(?2, ?10, ? #required), mixed, false) == ?"max_coverage");
 assert (Requirements.check(requirements(?2, ?90, ? #required), mixed, false) == ?"nsfw_required");
 assert (Requirements.check(requirements(?2, ?90, ? #required), mixed, true) == null);
 
-// A design that asks for nothing accepts anything, including a single-colour
-// chip that is entirely one colour and tagged.
+// A design that asks for nothing accepts anything, including a single-color
+// chip that is entirely one color and tagged.
 assert (Requirements.check(Memory.openRequirements(), plain, true) == null);
 
 // `checkArt` is `check` over art rather than a measurement already taken.
@@ -119,7 +119,7 @@ assert (Requirements.checkArt(requirements(?3, null, null), artOf([400, 300, 57]
 assert (Requirements.valid(Memory.openRequirements()));
 assert (Requirements.valid(requirements(?2, ?1, null)));
 assert (Requirements.valid(requirements(?Shape.MAX_PALETTE, ?99, ? #required)));
-// A minimum of one colour and a cap of a hundred percent restrict nothing, so
+// A minimum of one color and a cap of a hundred percent restrict nothing, so
 // they are not requirements a designer could have meant.
 assert (not Requirements.valid(requirements(?1, null, null)));
 assert (not Requirements.valid(requirements(null, ?100, null)));

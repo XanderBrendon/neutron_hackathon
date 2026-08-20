@@ -50,12 +50,12 @@ test("rings are uniform at one band and monotonic outward", () => {
   const three = renderGenerator("rings", options({ bands: 3 }));
   expect(new Set([...three]).size).toBe(3);
 
-  // Band index never decreases as a pixel gets further from the centre.
-  const centre = 31 / 2;
+  // Band index never decreases as a pixel gets further from the center.
+  const center = 31 / 2;
   const samples = [...three].map((value, index) => {
     const { x, y } = pixelPosition(index);
-    const dx = x + 0.5 - centre;
-    const dy = y + 0.5 - centre;
+    const dx = x + 0.5 - center;
+    const dy = y + 0.5 - center;
     return { distance: Math.hypot(dx, dy), band: PALETTE.indexOf(value) };
   });
   samples.sort((left, right) => left.distance - right.distance);
@@ -70,12 +70,12 @@ test("spokes divide the chip into contiguous angular runs", () => {
   const four = renderGenerator("spokes", options({ bands: 4 }));
   expect(new Set([...four]).size).toBe(4);
 
-  const centre = 31 / 2;
+  const center = 31 / 2;
   const byAngle = [...four]
     .map((value, index) => {
       const { x, y } = pixelPosition(index);
-      const dx = x + 0.5 - centre;
-      const dy = y + 0.5 - centre;
+      const dx = x + 0.5 - center;
+      const dy = y + 0.5 - center;
       return { angle: Math.atan2(dy, dx), band: PALETTE.indexOf(value) };
     })
     .sort((left, right) => left.angle - right.angle);

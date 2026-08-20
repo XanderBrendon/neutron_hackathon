@@ -399,7 +399,7 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                           void run(async () => {
                             const result = await fetchCatalogs([entry.canister]);
                             if (result.fetched.length > 0) {
-                              return "Catalogue refreshed.";
+                              return "Catalog refreshed.";
                             }
                             return result.retired.length > 0
                               ? "No answer again. Marked retired — they seem to have uninstalled Chipswap."

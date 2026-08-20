@@ -65,22 +65,22 @@ const TOOLS: Record<Tool, string> = {
   unlock: "Unlock",
 };
 
-/** Paints a control in the colour it stands for, with a legible label on top. */
-const swatchStyle = (colour: string) => ({
-  background: colour,
-  color: contrastColor(colour),
+/** Paints a control in the color it stands for, with a legible label on top. */
+const swatchStyle = (color: string) => ({
+  background: color,
+  color: contrastColor(color),
 });
 
 /**
  * A stamp that has been committed, with everything needed to put the picture
  * back the way it was: the placement it was stamped at, and the art it left
- * behind, which is how an undo is recognised as undoing this stamp.
+ * behind, which is how an undo is recognized as undoing this stamp.
  */
 type StampBack = {
   image: LoadedImage;
   zoom: number;
   offset: { x: number; y: number };
-  colours: number;
+  colors: number;
   art: Pattern;
 };
 
@@ -141,7 +141,7 @@ export const Studio = ({ status, onChanged }: Props) => {
 
   const selected = designs.find((design) => design.designId === selectedId) ?? null;
   const editable = selected?.state === "draft";
-  // A full palette can take no more colours, so the flyout has nothing to offer.
+  // A full palette can take no more colors, so the flyout has nothing to offer.
   const full = (editor?.palette.length ?? 0) >= MAX_PALETTE;
   // The blend ends fall back to black and white so the flyout still renders
   // while a design is loading and the palette is not there yet.
@@ -208,7 +208,7 @@ export const Studio = ({ status, onChanged }: Props) => {
     setPolicy({ requirements: selected.requirements, nsfw: selected.nsfw });
   }, [selected?.designId, selected?.revision, selected?.state]);
 
-  // The colour flyout dismisses like any menu: Escape, or a press that lands
+  // The color flyout dismisses like any menu: Escape, or a press that lands
   // outside it. Pointerdown rather than click, so starting a stroke on the chip
   // puts it away before the paint lands.
   useEffect(() => {
@@ -249,7 +249,7 @@ export const Studio = ({ status, onChanged }: Props) => {
   }, [editable]);
 
   // A preview indexes into the palette it was made with, so changing the
-  // palette puts it away rather than leaving it to be read against colours it
+  // palette puts it away rather than leaving it to be read against colors it
   // was never drawn for.
   useEffect(() => {
     setPreview(null);
@@ -345,7 +345,7 @@ export const Studio = ({ status, onChanged }: Props) => {
         const region =
           start === null ? [] : floodRegion(editor.pixels, editor.locks, start);
         if (region.length === 0) return null;
-        return { cells: region, changes: region, colour: ink };
+        return { cells: region, changes: region, color: ink };
       }
       const cells = stamp(brush, x, y);
       if (cells.length === 0) return null;
@@ -353,7 +353,7 @@ export const Studio = ({ status, onChanged }: Props) => {
         return {
           cells,
           changes: cells.filter((index) => editor.locks[index] !== 1),
-          colour: ink,
+          color: ink,
         };
       }
       // Locking only changes an unlocked pixel, unlocking only a locked one.
@@ -361,7 +361,7 @@ export const Studio = ({ status, onChanged }: Props) => {
       return {
         cells,
         changes: cells.filter((index) => editor.locks[index] === changeable),
-        colour: "#f2f5f7",
+        color: "#f2f5f7",
       };
     },
     [brush, editor, tool],
@@ -584,11 +584,11 @@ export const Studio = ({ status, onChanged }: Props) => {
     () => (image ? coverPlacement(image.raster, zoom, offset.x, offset.y) : null),
     [image, zoom, offset.x, offset.y],
   );
-  // The palette decides how much of the picture can survive: colours it cannot
-  // add are colours the picture has to do without.
+  // The palette decides how much of the picture can survive: colors it cannot
+  // add are colors the picture has to do without.
   const room = MAX_PALETTE - (editor?.palette.length ?? MAX_PALETTE);
-  const colourMax = Math.min(32, Math.max(0, room));
-  const stampBudget = Math.min(stampColors, colourMax);
+  const colorMax = Math.min(32, Math.max(0, room));
+  const stampBudget = Math.min(stampColors, colorMax);
   // Resampled on every nudge of the placement, so the chip underneath the
   // picture is always the chip that stamping would produce.
   const stamped = useMemo(
@@ -607,7 +607,7 @@ export const Studio = ({ status, onChanged }: Props) => {
       (index) => index >= 0 && index < editor.palette.length,
     );
     if (indices.length === 0) {
-      setFailure("Choose at least one palette colour for the generator.");
+      setFailure("Choose at least one palette color for the generator.");
       return;
     }
     setFailure(null);
@@ -638,7 +638,7 @@ export const Studio = ({ status, onChanged }: Props) => {
             image,
             zoom,
             offset,
-            colours: stampColors,
+            colors: stampColors,
             art: { pixels: next.pixels, palette: next.palette },
           },
     );
@@ -647,7 +647,7 @@ export const Studio = ({ status, onChanged }: Props) => {
     setMessage(
       added === 0
         ? "Image stamped. Locked pixels were left alone."
-        : `Image stamped, ${added} ${added === 1 ? "colour" : "colours"} added. Locked pixels were left alone.`,
+        : `Image stamped, ${added} ${added === 1 ? "color" : "colors"} added. Locked pixels were left alone.`,
     );
   };
 
@@ -661,7 +661,7 @@ export const Studio = ({ status, onChanged }: Props) => {
     setImage(stampBack.image);
     setZoom(stampBack.zoom);
     setOffset(stampBack.offset);
-    setStampColors(stampBack.colours);
+    setStampColors(stampBack.colors);
     setShowImage(true);
     setPreview(null);
     setMessage("Stamp undone. The picture is back where it was.");
@@ -794,7 +794,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                   title="Mark the middle row and column of the chip"
                   type="button"
                 >
-                  Centre lines
+                  Center lines
                 </button>
               </div>
             </div>
@@ -966,16 +966,16 @@ export const Studio = ({ status, onChanged }: Props) => {
             <h3 className="nt-section-title">Palette</h3>
             <div className="chipswap-palette" ref={paletteRef}>
               <div className="chipswap-swatches">
-                {editor.palette.map((colour, index) => (
+                {editor.palette.map((color, index) => (
                   <button
                     aria-pressed={editor.activeColor === index}
                     className={cx("chipswap-swatch", {
                       "chipswap-swatch--active": editor.activeColor === index,
                     })}
-                    key={`${colour}-${index}`}
+                    key={`${color}-${index}`}
                     onClick={() => setEditor(selectColor(editor, index))}
-                    style={swatchStyle(colour)}
-                    title={colour}
+                    style={swatchStyle(color)}
+                    title={color}
                     type="button"
                   >
                     {index}
@@ -984,12 +984,12 @@ export const Studio = ({ status, onChanged }: Props) => {
                 <button
                   aria-controls="chipswap-picker"
                   aria-expanded={picker}
-                  aria-label="Add a colour"
+                  aria-label="Add a color"
                   className={cx("chipswap-swatch chipswap-swatch--add", {
                     "chipswap-swatch--active": picker,
                   })}
                   onClick={() => setPicker((open) => !open)}
-                  title="Add a colour"
+                  title="Add a color"
                   type="button"
                 >
                   +
@@ -999,13 +999,13 @@ export const Studio = ({ status, onChanged }: Props) => {
                 <div className="chipswap-picker" id="chipswap-picker">
                   {full ? (
                     <p className="nt-meta">
-                      The palette is full at {MAX_PALETTE} colours. Remove one to
+                      The palette is full at {MAX_PALETTE} colors. Remove one to
                       make room.
                     </p>
                   ) : null}
                   <div className="nt-cluster">
                     <input
-                      aria-label="New colour"
+                      aria-label="New color"
                       className="chipswap-color-input"
                       onChange={(event) => setNewColor(event.currentTarget.value)}
                       type="color"
@@ -1022,7 +1022,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                     </button>
                   </div>
                   <div className="chipswap-blend">
-                    <span className="nt-meta">Or blend two palette colours</span>
+                    <span className="nt-meta">Or blend two palette colors</span>
                     <label className="nt-field">
                       <span className="nt-label">From</span>
                       <select
@@ -1031,9 +1031,9 @@ export const Studio = ({ status, onChanged }: Props) => {
                         style={swatchStyle(blendSource)}
                         value={blendFrom}
                       >
-                        {editor.palette.map((colour, index) => (
-                          <option key={index} style={swatchStyle(colour)} value={index}>
-                            {index}: {colour}
+                        {editor.palette.map((color, index) => (
+                          <option key={index} style={swatchStyle(color)} value={index}>
+                            {index}: {color}
                           </option>
                         ))}
                       </select>
@@ -1046,9 +1046,9 @@ export const Studio = ({ status, onChanged }: Props) => {
                         style={swatchStyle(blendTarget)}
                         value={blendTo}
                       >
-                        {editor.palette.map((colour, index) => (
-                          <option key={index} style={swatchStyle(colour)} value={index}>
-                            {index}: {colour}
+                        {editor.palette.map((color, index) => (
+                          <option key={index} style={swatchStyle(color)} value={index}>
+                            {index}: {color}
                           </option>
                         ))}
                       </select>
@@ -1087,12 +1087,12 @@ export const Studio = ({ status, onChanged }: Props) => {
                 onClick={() => setEditor(removePaletteColor(editor, editor.activeColor))}
                 title={
                   canRemovePaletteColor(editor, editor.activeColor)
-                    ? "Remove this colour"
-                    : "This colour is still on the chip"
+                    ? "Remove this color"
+                    : "This color is still on the chip"
                 }
                 type="button"
               >
-                Remove colour {editor.activeColor}
+                Remove color {editor.activeColor}
               </button>
             </div>
           </section>
@@ -1228,7 +1228,7 @@ export const Studio = ({ status, onChanged }: Props) => {
             {tool === "fill" ? (
               <p className="nt-help">
                 Fill spreads from the pixel you click across every pixel of the
-                same colour touching it, whatever the brush. Locked pixels stop
+                same color touching it, whatever the brush. Locked pixels stop
                 it.
               </p>
             ) : null}
@@ -1242,7 +1242,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                 onClick={() => setEditor(lockAllOfColor(editor, editor.activeColor))}
                 type="button"
               >
-                Lock all of colour {editor.activeColor}
+                Lock all of color {editor.activeColor}
               </button>
               <button
                 className="nt-button nt-button--ghost nt-button--sm"
@@ -1298,9 +1298,9 @@ export const Studio = ({ status, onChanged }: Props) => {
               </label>
             ))}
             <fieldset className="nt-fieldset">
-              <legend className="nt-label">Colours, in band order</legend>
+              <legend className="nt-label">Colors, in band order</legend>
               <div className="chipswap-swatches">
-                {editor.palette.map((colour, index) => {
+                {editor.palette.map((color, index) => {
                   const position = generatorColors.indexOf(index);
                   return (
                     <button
@@ -1316,7 +1316,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                             : [...current, index],
                         )
                       }
-                      style={swatchStyle(colour)}
+                      style={swatchStyle(color)}
                       type="button"
                     >
                       {position >= 0 ? position + 1 : ""}
@@ -1353,16 +1353,16 @@ export const Studio = ({ status, onChanged }: Props) => {
                     value={zoom}
                   />
                 </label>
-                {colourMax > 0 ? (
+                {colorMax > 0 ? (
                   <label className="nt-field">
                     <span className="nt-label">
                       {stampBudget === 0
-                        ? "Colours: the chip's own palette"
-                        : `Colours from the picture: ${stampBudget}`}
+                        ? "Colors: the chip's own palette"
+                        : `Colors from the picture: ${stampBudget}`}
                     </span>
                     <input
                       className="chipswap-range"
-                      max={colourMax}
+                      max={colorMax}
                       min={0}
                       onChange={(event) => setStampColors(Number(event.currentTarget.value))}
                       step={1}
@@ -1373,7 +1373,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                 ) : (
                   <p className="nt-help">
                     The palette is full, so the picture is approximated with the
-                    colours the chip already has.
+                    colors the chip already has.
                   </p>
                 )}
                 <div className="nt-cluster">
@@ -1403,7 +1403,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                     }}
                     type="button"
                   >
-                    Recentre
+                    Recenter
                   </button>
                   <button
                     className="nt-button nt-button--ghost nt-button--sm"
@@ -1415,7 +1415,7 @@ export const Studio = ({ status, onChanged }: Props) => {
                 </div>
                 <p className="nt-help">
                   Drag the picture across the chip to place it. Every chip pixel
-                  takes the average colour of the picture underneath it, and
+                  takes the average color of the picture underneath it, and
                   locked pixels keep what they have. Undo hands the picture back
                   where it was, so a stamp can be nudged and tried again. Source:{" "}
                   {image.width} × {image.height} px.

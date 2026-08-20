@@ -104,7 +104,7 @@ module {
     };
 
     // Whether we will spend a call on this designer at all. Both flags mean the
-    // same thing here, which is the point: the store, the crawl, the catalogue
+    // same thing here, which is the point: the store, the crawl, the catalog
     // refresh and the page we serve peers all ask this one question.
     public func active(entry : Memory.DirectoryEntry) : Bool {
         not entry.ignored and not entry.retired;

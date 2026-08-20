@@ -6,9 +6,9 @@
 // arithmetic over the art we actually send it. Both sides must agree, so any
 // change here belongs in that file too.
 //
-// A chip's palette is not the measure of its colours. A palette may declare
+// A chip's palette is not the measure of its colors. A palette may declare
 // sixty-four entries and paint three of them, and two entries may hold the same
-// colour, so colours are counted over the pixels the way an eye would count
+// color, so colors are counted over the pixels the way an eye would count
 // them.
 
 import { MAX_PALETTE } from "./palette.ts";
@@ -19,7 +19,7 @@ export type TradeRequirements = {
   /** Hold a qualifying offer for the designer rather than completing it. */
   approval: boolean;
   minColors: number | null;
-  /** Percent of the offered chip one colour may cover, at most. */
+  /** Percent of the offered chip one color may cover, at most. */
   maxCoverage: number | null;
   nsfw: NsfwRule;
 };
@@ -30,9 +30,9 @@ export const MAX_COVERAGE_FLOOR = 1;
 export const MAX_COVERAGE_CEILING = 99;
 
 export type Metrics = {
-  /** Distinct colours the art actually paints. */
+  /** Distinct colors the art actually paints. */
   colors: number;
-  /** Pixels held by the single most-used colour. */
+  /** Pixels held by the single most-used color. */
   topColorPixels: number;
   totalPixels: number;
 };
@@ -65,11 +65,11 @@ export function measure(pixels: Uint8Array, palette: string[]): Metrics {
   const counts = new Map<string, number>();
   let total = 0;
   for (const index of pixels) {
-    const colour = palette[index];
+    const color = palette[index];
     // Validated art never indexes past its palette; a stray index is left
-    // uncounted rather than counted as a colour that is not there.
-    if (colour === undefined) continue;
-    counts.set(colour, (counts.get(colour) ?? 0) + 1);
+    // uncounted rather than counted as a color that is not there.
+    if (color === undefined) continue;
+    counts.set(color, (counts.get(color) ?? 0) + 1);
     total += 1;
   }
   let top = 0;
@@ -110,7 +110,7 @@ export function check(
 
 /**
  * Whether a requirement set is one a designer could have meant. A minimum of one
- * colour and a cap of a hundred percent are satisfied by every chip that exists,
+ * color and a cap of a hundred percent are satisfied by every chip that exists,
  * so they are refused rather than stored as restrictions that do not restrict.
  */
 export function valid(requirements: TradeRequirements): boolean {
@@ -139,10 +139,10 @@ export function valid(requirements: TradeRequirements): boolean {
 export function describe(requirements: TradeRequirements): string[] {
   const parts: string[] = [];
   if (requirements.minColors !== null) {
-    parts.push(`${requirements.minColors} colours or more`);
+    parts.push(`${requirements.minColors} colors or more`);
   }
   if (requirements.maxCoverage !== null) {
-    parts.push(`no colour over ${requirements.maxCoverage}%`);
+    parts.push(`no color over ${requirements.maxCoverage}%`);
   }
   if (requirements.nsfw === "disallowed") parts.push("nothing tagged NSFW");
   if (requirements.nsfw === "required") parts.push("NSFW chips only");
@@ -154,9 +154,9 @@ export function describe(requirements: TradeRequirements): string[] {
 export function failureMessage(code: FailureCode): string {
   switch (code) {
     case "min_colors":
-      return "uses too few colours";
+      return "uses too few colors";
     case "max_coverage":
-      return "has one colour covering too much of it";
+      return "has one color covering too much of it";
     case "nsfw_disallowed":
       return "is tagged NSFW";
     case "nsfw_required":

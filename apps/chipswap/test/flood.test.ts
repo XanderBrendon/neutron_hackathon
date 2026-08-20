@@ -2,19 +2,19 @@ import { expect, test } from "bun:test";
 import { PIXEL_COUNT, pixelIndexAt, pixelPosition } from "../src/chip.ts";
 import { floodRegion } from "../src/flood.ts";
 
-const CENTRE = pixelIndexAt(15, 15)!;
+const CENTER = pixelIndexAt(15, 15)!;
 
 const blank = () => new Uint8Array(PIXEL_COUNT);
 
-/** The chip split down the middle: column 15 painted colour 1. */
+/** The chip split down the middle: column 15 painted color 1. */
 const walled = () => {
   const pixels = blank();
   for (let y = 0; y < 31; y += 1) pixels[pixelIndexAt(15, y)!] = 1;
   return pixels;
 };
 
-test("a fill on one flat colour covers the whole chip", () => {
-  const region = floodRegion(blank(), blank(), CENTRE);
+test("a fill on one flat color covers the whole chip", () => {
+  const region = floodRegion(blank(), blank(), CENTER);
 
   expect(region).toHaveLength(PIXEL_COUNT);
   expect(new Set(region).size).toBe(PIXEL_COUNT);
@@ -22,7 +22,7 @@ test("a fill on one flat colour covers the whole chip", () => {
   expect(region).toEqual([...region].sort((left, right) => left - right));
 });
 
-test("a wall of another colour keeps the two sides apart", () => {
+test("a wall of another color keeps the two sides apart", () => {
   const pixels = walled();
   const left = floodRegion(pixels, blank(), pixelIndexAt(5, 15)!);
   const right = floodRegion(pixels, blank(), pixelIndexAt(25, 15)!);
@@ -52,10 +52,10 @@ test("locked pixels wall the fill in and never join it", () => {
 
 test("touching at a corner is not touching", () => {
   const pixels = new Uint8Array(PIXEL_COUNT).fill(1);
-  pixels[CENTRE] = 0;
+  pixels[CENTER] = 0;
   pixels[pixelIndexAt(16, 16)!] = 0;
 
-  expect(floodRegion(pixels, blank(), CENTRE)).toEqual([CENTRE]);
+  expect(floodRegion(pixels, blank(), CENTER)).toEqual([CENTER]);
 });
 
 test("a fill outside the chip covers nothing", () => {

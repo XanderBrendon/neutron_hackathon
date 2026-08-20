@@ -103,7 +103,7 @@ switch (
     chipswap.chipswap_draft_save({
         design_id = 1;
         expected_revision = 2;
-        title = "Bad colour";
+        title = "Bad color";
         palette = ["101010"];
         pixels = designs[0].art.pixels;
     })
@@ -219,7 +219,7 @@ assert (directory.entries[0].source == "trade");
 assert (directory.entries[0].retired == false);
 assert (directory.entries[0].strikes == 0);
 
-// Reading our catalogue does not put the reader here. Browsing is not a
+// Reading our catalog does not put the reader here. Browsing is not a
 // relationship; proposing a trade is, which is why the peer above is listed and
 // this one is not.
 let browser = Principal.fromBlob(Blob.fromArray([0, 4, 4, 1]));

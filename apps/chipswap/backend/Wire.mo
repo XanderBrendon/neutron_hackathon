@@ -21,7 +21,7 @@ import Shape "./Shape";
 // can never mean the same message.
 //
 // One version is current and it is the only one read or written. Version 3
-// removes the directory that used to ride along on a catalogue and a trade, and
+// removes the directory that used to ride along on a catalog and a trade, and
 // replaces the announce message with a directory message that is asked for. A
 // message in an older layout is refused rather than misread, which is the one
 // thing the version byte exists to do.
@@ -48,7 +48,7 @@ module {
     let FLAG_NSFW_REQUIRED : Nat = 16;
     let FLAG_KNOWN : Nat = 31;
 
-    // Bounds a requirement must satisfy to have travelled honestly. They match
+    // Bounds a requirement must satisfy to have traveled honestly. They match
     // Requirements.mo; a value outside them never becomes a stored requirement.
     let MIN_COLORS_FLOOR : Nat = 2;
     let MAX_COVERAGE_FLOOR : Nat = 1;
@@ -350,7 +350,7 @@ module {
         appendText(bytes, art.shape_id, MAX_SHAPE_ID_BYTES);
         let palette = capped<Nat32>(art.palette, Shape.MAX_PALETTE);
         appendU16(bytes, palette.size());
-        for (colour in palette.values()) appendU32(bytes, Nat32.toNat(colour));
+        for (color in palette.values()) appendU32(bytes, Nat32.toNat(color));
         appendBlob(bytes, art.pixels);
     };
 
@@ -563,7 +563,7 @@ module {
     };
 
     // A requirement outside its bounds is refused rather than clamped: a peer
-    // that asks for a hundred and ninety colours is not describing a chip.
+    // that asks for a hundred and ninety colors is not describing a chip.
     func readRequirements(reader : Reader) : ?Requirements {
         let flags = reader.u8();
         if (not reader.ok()) return null;

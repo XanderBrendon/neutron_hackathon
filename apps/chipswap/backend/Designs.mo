@@ -19,7 +19,7 @@ module {
     public let MAX_SLOTS : Nat = 10;
     public let MAX_TITLE_CHARS : Nat = 48;
 
-    // A new draft opens with a usable working palette rather than one colour, so
+    // A new draft opens with a usable working palette rather than one color, so
     // the editor has something to blend and lock against immediately.
     let STARTER_PALETTE : [Nat32] = [
         0x0e141a,
@@ -190,7 +190,7 @@ module {
             art = design.art;
             // Read off the design once, here. A designer may retag their design
             // later; a chip that has already changed hands keeps what it left
-            // with, so nobody's collection is relabelled behind their back.
+            // with, so nobody's collection is relabeled behind their back.
             nsfw = design.nsfw;
             design_revision = design.revision;
             minted_at_ns = now;

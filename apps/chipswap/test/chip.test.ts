@@ -115,7 +115,7 @@ test("the mask's edges are listed once each", () => {
   expect(drawn.has("vertical:31:30")).toBe(false);
 });
 
-test("the centre accent frames the middle row and column", () => {
+test("the center accent frames the middle row and column", () => {
   const edges = centerEdges();
   const keys = edges.map(({ orientation, x, y }) => `${orientation}:${x}:${y}`);
 
@@ -123,7 +123,7 @@ test("the centre accent frames the middle row and column", () => {
   expect(new Set(keys).size).toBe(keys.length);
 
   // Two lines above and below the middle row, two either side of the middle
-  // column: the row and column that meet at the centre pixel are boxed in.
+  // column: the row and column that meet at the center pixel are boxed in.
   const expected = new Set<string>();
   for (let x = 0; x < DIAMETER; x += 1) {
     expected.add(`horizontal:${x}:${CENTER}`);
@@ -159,7 +159,7 @@ test("an outline traces a cell set's boundary and nothing inside it", () => {
     ({ orientation, x, y }) => `${orientation}:${x}:${y}`,
   );
 
-  // Three edges along each of the four sides, and nothing between neighbours:
+  // Three edges along each of the four sides, and nothing between neighbors:
   // a brush stamp reads as one shape rather than as a box per cell.
   expect(new Set(keys).size).toBe(keys.length);
   expect(keys).toHaveLength(12);

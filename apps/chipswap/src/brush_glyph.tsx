@@ -6,7 +6,7 @@
 
 import { MAX_BRUSH_SIDE, type Brush } from "./brushes.ts";
 
-// Cells are inset inside their square so neighbours stay separate marks.
+// Cells are inset inside their square so neighbors stay separate marks.
 const INSET = 0.1;
 
 export const BrushGlyph = ({ brush }: { brush: Brush }) => {

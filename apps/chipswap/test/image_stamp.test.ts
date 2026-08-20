@@ -4,7 +4,7 @@ import { MAX_PALETTE, formatHexColor } from "../src/palette.ts";
 import {
   buildStamp,
   coverPlacement,
-  quantise,
+  quantize,
   sampleChip,
   type Raster,
 } from "../src/image_stamp.ts";
@@ -43,7 +43,7 @@ const blankChip = (palette: string[]) => ({
   locks: new Uint8Array(PIXEL_COUNT),
 });
 
-test("a placement covers the chip and stays centred", () => {
+test("a placement covers the chip and stays centered", () => {
   const square = coverPlacement({ width: 100, height: 100 }, 1, 0, 0);
   expect(square).toEqual({ left: 0, top: 0, width: DIAMETER, height: DIAMETER });
 
@@ -55,7 +55,7 @@ test("a placement covers the chip and stays centred", () => {
 
   const zoomed = coverPlacement({ width: 100, height: 100 }, 2, 0, 0);
   expect(zoomed.width).toBeCloseTo(DIAMETER * 2);
-  // Zooming holds the centre, so the picture grows around the middle pixel.
+  // Zooming holds the center, so the picture grows around the middle pixel.
   expect(zoomed.left + zoomed.width / 2).toBeCloseTo(DIAMETER / 2);
 
   const nudged = coverPlacement({ width: 100, height: 100 }, 1, 3, -2);
@@ -81,7 +81,7 @@ test("a chip pixel takes the average of the image pixels inside it", () => {
   }
 });
 
-test("a chip pixel the image does not reach takes no colour at all", () => {
+test("a chip pixel the image does not reach takes no color at all", () => {
   const solid = raster(62, 62, () => RED);
 
   // Shoved off the chip entirely.
@@ -102,24 +102,24 @@ test("a chip pixel the image does not reach takes no colour at all", () => {
 
 test("a picture magnified past its own pixels still samples", () => {
   // One image pixel stretched over the whole chip: no chip pixel contains a
-  // pixel centre, so each one has to take the colour underneath it.
+  // pixel center, so each one has to take the color underneath it.
   const single = raster(1, 1, () => BLUE);
   const samples = sampleChip(single, coverPlacement(single, 1, 0, 0));
   expect(samples.every((sample) => sample?.b === 255)).toBe(true);
 });
 
-test("quantise reduces colours and never invents one", () => {
+test("quantize reduces colors and never invents one", () => {
   const black = { r: 0, g: 0, b: 0 };
   const white = { r: 255, g: 255, b: 255 };
 
-  expect(quantise([], 4)).toEqual([]);
-  expect(quantise([black], 0)).toEqual([]);
+  expect(quantize([], 4)).toEqual([]);
+  expect(quantize([black], 0)).toEqual([]);
 
   // Balanced populations split cleanly down the middle.
-  expect(quantise([black, black, white, white], 2)).toEqual([black, white]);
+  expect(quantize([black, black, white, white], 2)).toEqual([black, white]);
 
-  // One colour, however many copies, is one box: there is nothing to split.
-  expect(quantise([black, black, black], 8)).toEqual([black]);
+  // One color, however many copies, is one box: there is nothing to split.
+  expect(quantize([black, black, black], 8)).toEqual([black]);
 
   const spread = [
     { r: 250, g: 10, b: 10 },
@@ -129,19 +129,19 @@ test("quantise reduces colours and never invents one", () => {
     { r: 10, g: 250, b: 10 },
     { r: 0, g: 240, b: 20 },
   ];
-  const reduced = quantise(spread, 3);
+  const reduced = quantize(spread, 3);
   expect(reduced.length).toBeLessThanOrEqual(3);
-  for (const colour of reduced) {
+  for (const color of reduced) {
     // Every representative is an average of real samples, so it lands inside
     // the range the samples occupy.
-    expect(colour.r).toBeGreaterThanOrEqual(0);
-    expect(colour.r).toBeLessThanOrEqual(250);
-    expect(colour.g).toBeLessThanOrEqual(250);
-    expect(colour.b).toBeLessThanOrEqual(250);
+    expect(color.r).toBeGreaterThanOrEqual(0);
+    expect(color.r).toBeLessThanOrEqual(250);
+    expect(color.g).toBeLessThanOrEqual(250);
+    expect(color.b).toBeLessThanOrEqual(250);
   }
 });
 
-test("with no colour budget the image is approximated in the chip's palette", () => {
+test("with no color budget the image is approximated in the chip's palette", () => {
   const split = raster(62, 62, (x) => (x < SPLIT ? RED : BLUE));
   const chip = blankChip(["#000000", "#ff0000", "#0000ff"]);
   const stamp = buildStamp(split, coverPlacement(split, 1, 0, 0), chip, 0);
@@ -152,7 +152,7 @@ test("with no colour budget the image is approximated in the chip's palette", ()
   expect(stamp.pixels[pixelIndexAt(25, 15)!]).toBe(2);
 });
 
-test("a colour budget brings the image's own colours into the palette", () => {
+test("a color budget brings the image's own colors into the palette", () => {
   const solid = raster(62, 62, () => [17, 34, 51, 255]);
   const chip = blankChip(["#000000", "#ffffff"]);
   const stamp = buildStamp(solid, coverPlacement(solid, 1, 0, 0), chip, 4);
@@ -162,14 +162,14 @@ test("a colour budget brings the image's own colours into the palette", () => {
   expect([...stamp.pixels].every((pixel) => pixel === 2)).toBe(true);
 
   // Half the chip, half the picture: the pixels it never covers keep the
-  // colour they had rather than being cleared to something.
+  // color they had rather than being cleared to something.
   const painted = { ...chip, pixels: new Uint8Array(PIXEL_COUNT).fill(1) };
   const partial = buildStamp(solid, coverPlacement(solid, 1, 40, 0), painted, 4);
   expect(partial.added).toBe(0);
   expect([...partial.pixels].every((pixel) => pixel === 1)).toBe(true);
 });
 
-test("locked pixels keep their colour and take no part in the budget", () => {
+test("locked pixels keep their color and take no part in the budget", () => {
   const split = raster(62, 62, (x) => (x < SPLIT ? RED : BLUE));
   // Everything the red half of the picture lands on is locked.
   const locks = new Uint8Array(PIXEL_COUNT);
@@ -182,13 +182,13 @@ test("locked pixels keep their colour and take no part in the budget", () => {
   const chip = { palette: ["#000000"], pixels: new Uint8Array(PIXEL_COUNT), locks };
   const stamp = buildStamp(split, coverPlacement(split, 1, 0, 0), chip, 1);
 
-  // The one colour it could afford went to the half it was allowed to paint.
+  // The one color it could afford went to the half it was allowed to paint.
   expect(stamp.palette).toEqual(["#000000", "#0000ff"]);
   expect(stamp.pixels[pixelIndexAt(5, 15)!]).toBe(0);
   expect(stamp.pixels[pixelIndexAt(25, 15)!]).toBe(1);
 });
 
-test("a full palette takes no more colours", () => {
+test("a full palette takes no more colors", () => {
   const solid = raster(62, 62, () => [17, 34, 51, 255]);
   const palette = Array.from({ length: MAX_PALETTE }, (_, index) =>
     formatHexColor({ r: index * 4, g: index * 4, b: index * 4 }),
@@ -198,6 +198,6 @@ test("a full palette takes no more colours", () => {
   expect(stamp.added).toBe(0);
   expect(stamp.palette).toHaveLength(MAX_PALETTE);
   // Nearest of what was already there, rather than nothing at all. Green
-  // carries the most weight, so #112233 lands nearer grey 36 than grey 32.
+  // carries the most weight, so #112233 lands nearer gray 36 than gray 32.
   expect(stamp.pixels[pixelIndexAt(15, 15)!]).toBe(9);
 });

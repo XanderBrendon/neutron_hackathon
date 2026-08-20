@@ -2,7 +2,7 @@ import Blob "mo:core/Blob";
 import Nat8 "mo:core/Nat8";
 
 // Chip geometry. The row-width table from Planning/chipswap.md is the source of
-// truth; it is exactly the raster of a 31px circle sampled at pixel centres.
+// truth; it is exactly the raster of a 31px circle sampled at pixel centers.
 // Every consumer derives offsets from this data rather than assuming a radius,
 // so a future chip shape is a new descriptor rather than a rewrite.
 module {
@@ -51,7 +51,7 @@ module {
     };
 
     // Index for chip-local coordinates, where both axes run 0..DIAMETER-1 and
-    // each row is centred inside the square.
+    // each row is centered inside the square.
     public func indexAt(x : Nat, y : Nat) : ?Nat {
         if (y >= ROW_WIDTHS.size() or x >= DIAMETER) return null;
         let width = ROW_WIDTHS[y];

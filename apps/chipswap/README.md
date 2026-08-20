@@ -5,7 +5,7 @@ Neutron canisters.
 
 A chip is a 31 px circle of **757 pixels** — the row widths come from
 `Planning/chipswap.md` and are exactly the raster of a circle sampled at pixel
-centres. Art is palette-indexed: up to 64 colours plus one index per pixel, so a
+centers. Art is palette-indexed: up to 64 colors plus one index per pixel, so a
 whole ten-design catalog crosses the network in about 10 KB.
 
 ## How it works
@@ -20,7 +20,7 @@ and costs you nothing. Offering a chip you acquired from someone else consumes
 it — you no longer own it and would have to trade for it again.
 
 **Trade requirements.** A design may ask something of the chip offered for it:
-a minimum number of colours, a cap on how much of it any one colour covers, and
+a minimum number of colors, a cap on how much of it any one color covers, and
 whether the offered chip may or must carry the NSFW tag. An offer that fails a
 requirement is declined outright. A fourth requirement, *designer approves*,
 does not refuse anything — it holds a qualifying offer in escrow until you
@@ -28,13 +28,13 @@ accept or decline it. All four are optional, and a design that asks for nothing
 swaps freely in a single call.
 
 Requirements are measured on the receiving side, over the offered art itself,
-so a peer cannot assert that its chip has twelve colours: it hands over the
-pixels and they are counted. Colours are counted over the pixels rather than
+so a peer cannot assert that its chip has twelve colors: it hands over the
+pixels and they are counted. Colors are counted over the pixels rather than
 the palette, so padding a palette with swatches nothing paints satisfies
 nothing. The tag is the exception — it can only ever be the offering
 canister's word about its own art, in the same way the title is. The store runs
 the same arithmetic against your own chips before you offer one, so an offer
-that would bounce is greyed out with the reason on it rather than costing a
+that would bounce is grayed out with the reason on it rather than costing a
 paid call to find out.
 
 **The NSFW tag.** A design may be tagged, and every chip minted from it carries
@@ -44,10 +44,10 @@ for them, and the store says how many it left out.
 
 **Stamping a picture.** A picture chosen from a file or pasted from the
 clipboard is placed under the chip, dragged and scaled against a live preview,
-and then sampled: each chip pixel takes the average colour of the picture
-underneath it, and the picture's colours are reduced by median cut to a budget
+and then sampled: each chip pixel takes the average color of the picture
+underneath it, and the picture's colors are reduced by median cut to a budget
 that fits the palette. Locked pixels are left out of it — they keep their
-colour, and their samples take no part in the reduction. Undo takes the stamp
+color, and their samples take no part in the reduction. Undo takes the stamp
 off and hands the picture back at the placement it was stamped from, so a stamp
 that came out wrong is nudged and tried again rather than set up afresh.
 
@@ -139,7 +139,7 @@ remains.
 ```sh
 cd apps/chipswap
 npm test              # package + bun tests + Motoko tests
-npm run package       # writes chipswap.v0.1.7.neutron
+npm run package       # writes chipswap.v0.1.9.neutron
 npm run test:motoko   # Motoko unit tests only
 ```
 
@@ -170,7 +170,7 @@ backend/
   main.mo           public methods, routes, and outbound drivers
 src/
   chip.ts           geometry mirrored from Shape.mo
-  palette.ts        colours and blending
+  palette.ts        colors and blending
   brushes.ts        preset and custom brushes
   patterns.ts       ring, spoke, and grid generators
   flood.ts          the region a fill covers

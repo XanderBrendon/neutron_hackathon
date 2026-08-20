@@ -15,8 +15,8 @@ import {
 import type { TradePolicy } from "./api.ts";
 
 // Turning a requirement on needs a value, and these are the ones a designer is
-// most likely to have meant: a chip with a handful of colours, and a chip that
-// is not most of one colour.
+// most likely to have meant: a chip with a handful of colors, and a chip that
+// is not most of one color.
 const DEFAULT_MIN_COLORS = 4;
 const DEFAULT_MAX_COVERAGE = 60;
 
@@ -71,7 +71,7 @@ export const TradePolicyFields = ({
         />
         <span className="nt-label">Offered chip uses at least</span>
         <input
-          aria-label="Minimum colours"
+          aria-label="Minimum colors"
           className="nt-input chipswap-policy-number"
           disabled={requirements.minColors === null}
           max={MIN_COLORS_CEILING}
@@ -88,7 +88,7 @@ export const TradePolicyFields = ({
           type="number"
           value={requirements.minColors ?? DEFAULT_MIN_COLORS}
         />
-        <span className="nt-label">colours</span>
+        <span className="nt-label">colors</span>
       </label>
 
       <label className="nt-field chipswap-policy-check">
@@ -101,9 +101,9 @@ export const TradePolicyFields = ({
           }
           type="checkbox"
         />
-        <span className="nt-label">No one colour covers more than</span>
+        <span className="nt-label">No one color covers more than</span>
         <input
-          aria-label="Maximum single-colour coverage"
+          aria-label="Maximum single-color coverage"
           className="nt-input chipswap-policy-number"
           disabled={requirements.maxCoverage === null}
           max={MAX_COVERAGE_CEILING}
@@ -181,10 +181,10 @@ export const PolicyBadges = ({ requirements, nsfw }: PolicyBadgesProps) => (
       <span className="nt-badge">Designer approves</span>
     ) : null}
     {requirements.minColors !== null ? (
-      <span className="nt-badge">{requirements.minColors}+ colours</span>
+      <span className="nt-badge">{requirements.minColors}+ colors</span>
     ) : null}
     {requirements.maxCoverage !== null ? (
-      <span className="nt-badge">≤{requirements.maxCoverage}% one colour</span>
+      <span className="nt-badge">≤{requirements.maxCoverage}% one color</span>
     ) : null}
     {requirements.nsfw === "disallowed" ? (
       <span className="nt-badge">No NSFW</span>

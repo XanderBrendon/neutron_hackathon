@@ -207,7 +207,7 @@ let ?decodedOpen = Wire.decodeCatalogReply(openBytes) else Runtime.trap("open ca
 assert (decodedOpen.designs[0].requirements == openDesign.requirements);
 assert (not decodedOpen.designs[0].nsfw);
 // Two bytes shorter than the message above: one flags byte with nothing set,
-// where the other carried a colour minimum and a coverage cap as well.
+// where the other carried a color minimum and a coverage cap as well.
 assert (bytesOf(openBytes).size() + 2 == bytesOf(
     Wire.encodeCatalogReply({ designs = [design] })
 ).size());

@@ -258,7 +258,7 @@
     padding-top: var(--nt-pad-3);
   }
 
-  /* Each end of the blend wears the colour it stands for, so it needs an edge
+  /* Each end of the blend wears the color it stands for, so it needs an edge
      of its own: the design system's underline vanishes against a dark swatch. */
   .chipswap-blend-select {
     box-shadow: inset 0 0 0 1px var(--nt-line-strong);
@@ -472,8 +472,8 @@
     gap: var(--nt-gap-2);
   }
 
-  // The buttons share a form-grid row with a labelled input. Left to stretch,
-  // the cluster centres them across the label as well, floating them above the
+  // The buttons share a form-grid row with a labeled input. Left to stretch,
+  // the cluster centers them across the label as well, floating them above the
   // input they belong to; ending the cluster sits them on the input's baseline.
   .chipswap-add-designer {
     align-self: end;

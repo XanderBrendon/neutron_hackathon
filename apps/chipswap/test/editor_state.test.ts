@@ -50,7 +50,7 @@ test("painting writes only the given pixels and never mutates in place", () => {
   expect(painted.canUndo).toBe(true);
 });
 
-test("painting a colour that is not in the palette is refused", () => {
+test("painting a color that is not in the palette is refused", () => {
   const state = fresh();
   expect(() => paint(state, [A], 9)).toThrow();
 });
@@ -69,7 +69,7 @@ test("locked pixels survive every mutation", () => {
   expect(filled.pixels[B]).toBe(2);
 });
 
-test("locking by colour selects exactly that colour's pixels", () => {
+test("locking by color selects exactly that color's pixels", () => {
   let state = paint(fresh(), [A, B], 1);
   state = paint(state, [C], 2);
   state = lockAllOfColor(state, 1);
@@ -150,20 +150,20 @@ test("a no-op paint does not grow the history", () => {
   expect(state.canUndo).toBe(false);
 });
 
-test("palette colours can be added up to the limit", () => {
+test("palette colors can be added up to the limit", () => {
   let state = addPaletteColor(fresh(), "#123456");
   expect(state.palette).toHaveLength(4);
   expect(state.palette[3]).toBe("#123456");
 
-  // Adding a colour already present selects it instead of duplicating it.
+  // Adding a color already present selects it instead of duplicating it.
   state = addPaletteColor(state, "#123456");
   expect(state.palette).toHaveLength(4);
   expect(state.activeColor).toBe(3);
 
-  expect(() => addPaletteColor(state, "not a colour")).toThrow();
+  expect(() => addPaletteColor(state, "not a color")).toThrow();
 });
 
-test("a palette colour is removable only while unused", () => {
+test("a palette color is removable only while unused", () => {
   const painted = paint(fresh(), [A], 2);
 
   expect(canRemovePaletteColor(painted, 2)).toBe(false);
@@ -174,19 +174,19 @@ test("a palette colour is removable only while unused", () => {
   const removed = removePaletteColor(unused, 2);
   expect(removed.palette).toEqual(["#000000", "#ffffff"]);
 
-  // The last colour can never go: a chip needs somewhere to point.
+  // The last color can never go: a chip needs somewhere to point.
   let single = removePaletteColor(removed, 1);
   single = removePaletteColor(single, 0);
   expect(single.palette).toHaveLength(1);
 });
 
-test("removing a colour renumbers the pixels above it", () => {
+test("removing a color renumbers the pixels above it", () => {
   let state = fresh();
   state = addPaletteColor(state, "#123456");
   state = paint(state, [A], 3);
   state = paint(state, [B], 1);
 
-  // Colour 2 is unused, so removing it shifts colour 3 down to 2.
+  // Color 2 is unused, so removing it shifts color 3 down to 2.
   expect(canRemovePaletteColor(state, 2)).toBe(true);
   const removed = removePaletteColor(state, 2);
   expect(removed.palette).toEqual(["#000000", "#ffffff", "#123456"]);
@@ -208,7 +208,7 @@ test("a pattern preview shows the locked pixels as they will stay", () => {
   ]);
 });
 
-test("a pattern may bring colours of its own", () => {
+test("a pattern may bring colors of its own", () => {
   const state = fresh();
   const pixels = new Uint8Array(PIXEL_COUNT).fill(3);
   const stamped = applyPattern(state, {
@@ -221,11 +221,11 @@ test("a pattern may bring colours of its own", () => {
   expect(undo(stamped).palette).toEqual(PALETTE);
 });
 
-test("a pattern that renames the chip's colours is refused", () => {
+test("a pattern that renames the chip's colors is refused", () => {
   const state = fresh();
   const pixels = new Uint8Array(PIXEL_COUNT);
 
-  // Dropping or reordering an existing colour would repaint the pixels the
+  // Dropping or reordering an existing color would repaint the pixels the
   // pattern is not allowed to touch.
   expect(() =>
     applyPattern(state, { pixels, palette: ["#ffffff", "#000000", "#7fd1c1"] }),
@@ -245,7 +245,7 @@ test("a pattern that changes nothing does not grow the history", () => {
   expect(applyPattern(state, { pixels, palette: PALETTE }).canUndo).toBe(false);
 });
 
-test("a chip recognises the art a pattern left on it", () => {
+test("a chip recognizes the art a pattern left on it", () => {
   let state = paint(fresh(), [A], 1);
   state = paintLocks(state, [A], true);
   const pattern = {
@@ -255,7 +255,7 @@ test("a chip recognises the art a pattern left on it", () => {
   const stamped = applyPattern(state, pattern);
 
   // The art on the chip, not the pattern as offered: the locked pixel kept its
-  // own colour, so the pattern itself no longer describes what is there.
+  // own color, so the pattern itself no longer describes what is there.
   const art = { pixels: stamped.pixels, palette: stamped.palette };
   expect(patternShowing(stamped, art)).toBe(true);
   expect(patternShowing(stamped, pattern)).toBe(false);

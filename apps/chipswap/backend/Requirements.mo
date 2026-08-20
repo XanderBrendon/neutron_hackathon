@@ -9,13 +9,13 @@ import Shape "./Shape";
 //
 // The measurement runs on the receiving side, over the offered art itself,
 // which crosses the wire in full. A peer cannot assert that its chip has twelve
-// colours; it hands over the pixels and we count them. The one claim we cannot
+// colors; it hands over the pixels and we count them. The one claim we cannot
 // check is the NSFW tag, which is the offering canister's word about its own
 // art in the same way the title is.
 //
-// The chip's palette is not the measure of its colours: a palette may hold
+// The chip's palette is not the measure of its colors: a palette may hold
 // sixty-four entries and paint three of them, and two entries may hold the same
-// colour. Both are counted the way an eye would count them, over the pixels.
+// color. Both are counted the way an eye would count them, over the pixels.
 module {
     public let MIN_COLORS_FLOOR : Nat = 2;
     public let MIN_COLORS_CEILING : Nat = Shape.MAX_PALETTE;
@@ -23,9 +23,9 @@ module {
     public let MAX_COVERAGE_CEILING : Nat = 99;
 
     public type Metrics = {
-        /** Distinct colour values the art actually paints. */
+        /** Distinct color values the art actually paints. */
         colors : Nat;
-        /** Pixels held by the single most-used colour. */
+        /** Pixels held by the single most-used color. */
         top_color_pixels : Nat;
         /** Pixels the art covers; the divisor for a coverage percentage. */
         total_pixels : Nat;
@@ -39,12 +39,12 @@ module {
             // Art reaching this point has been validated, so the index is in
             // range; a stray one is simply not counted rather than trapping.
             if (slot < art.palette.size()) {
-                let colour = art.palette[slot];
-                let seen = switch (Map.get(counts, Nat32.compare, colour)) {
+                let color = art.palette[slot];
+                let seen = switch (Map.get(counts, Nat32.compare, color)) {
                     case (?value) value;
                     case null 0;
                 };
-                Map.add(counts, Nat32.compare, colour, seen + 1);
+                Map.add(counts, Nat32.compare, color, seen + 1);
                 total += 1;
             };
         };
@@ -99,7 +99,7 @@ module {
 
     /**
      * Whether a requirement set is one a designer could have meant. A minimum of
-     * one colour and a cap of a hundred percent are satisfied by every chip that
+     * one color and a cap of a hundred percent are satisfied by every chip that
      * exists, so they are refused rather than stored as requirements that read
      * as restrictions and are not.
      */

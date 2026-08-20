@@ -40,7 +40,7 @@ function requiring(
 const PLAIN = measure(pixelsOf([PIXEL_COUNT]), PALETTE);
 const MIXED = measure(pixelsOf([400, 300, 57]), PALETTE);
 
-test("colours are counted over the pixels, not over the palette", () => {
+test("colors are counted over the pixels, not over the palette", () => {
   expect(PLAIN.colors).toBe(1);
   expect(PLAIN.topColorPixels).toBe(PIXEL_COUNT);
   expect(PLAIN.totalPixels).toBe(PIXEL_COUNT);
@@ -48,15 +48,15 @@ test("colours are counted over the pixels, not over the palette", () => {
   expect(MIXED.colors).toBe(3);
   expect(MIXED.topColorPixels).toBe(400);
 
-  // A palette entry nothing paints is not a colour of this chip, so padding the
-  // palette is not a way to satisfy a colour minimum.
+  // A palette entry nothing paints is not a color of this chip, so padding the
+  // palette is not a way to satisfy a color minimum.
   const padded = measure(
     pixelsOf([400, 357]),
     Array.from({ length: MAX_PALETTE }, (_, index) => `#0000${index.toString(16).padStart(2, "0")}`),
   );
   expect(padded.colors).toBe(2);
 
-  // Two palette entries holding the same colour are one colour, and their
+  // Two palette entries holding the same color are one color, and their
   // pixels belong to it together.
   const duplicated = measure(pixelsOf([400, 300, 57]), [
     "#101010",
@@ -68,7 +68,7 @@ test("colours are counted over the pixels, not over the palette", () => {
   expect(duplicated.topColorPixels).toBe(700);
 });
 
-test("a colour minimum is at least, not more than", () => {
+test("a color minimum is at least, not more than", () => {
   expect(check(requiring(3, null, "any"), MIXED, false)).toBeNull();
   expect(check(requiring(4, null, "any"), MIXED, false)).toBe("min_colors");
 });
@@ -104,7 +104,7 @@ test("requirements combine, and the first one that fails is the one reported", (
   expect(check(requiring(2, 90, "required"), MIXED, true)).toBeNull();
 
   // A design that asks for nothing accepts anything, including a chip that is
-  // entirely one colour and tagged.
+  // entirely one color and tagged.
   expect(check(openRequirements(), PLAIN, true)).toBeNull();
 });
 
@@ -137,8 +137,8 @@ test("approval is neither open nor restrictive", () => {
 test("a policy reads as a list, most concrete first", () => {
   expect(describe(openRequirements())).toEqual([]);
   expect(describe({ approval: true, minColors: 4, maxCoverage: 60, nsfw: "disallowed" })).toEqual([
-    "4 colours or more",
-    "no colour over 60%",
+    "4 colors or more",
+    "no color over 60%",
     "nothing tagged NSFW",
     "designer approves",
   ]);
@@ -146,9 +146,9 @@ test("a policy reads as a list, most concrete first", () => {
 });
 
 test("a refusal is phrased about the chip that was offered", () => {
-  expect(failureMessage("min_colors")).toBe("uses too few colours");
+  expect(failureMessage("min_colors")).toBe("uses too few colors");
   expect(failureMessage("max_coverage")).toBe(
-    "has one colour covering too much of it",
+    "has one color covering too much of it",
   );
   expect(failureMessage("nsfw_disallowed")).toBe("is tagged NSFW");
   expect(failureMessage("nsfw_required")).toBe("is not tagged NSFW");

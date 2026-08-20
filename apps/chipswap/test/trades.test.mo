@@ -162,8 +162,8 @@ switch (Trades.acceptInbound(auto, inbound(requestId(7), 1, firstOffer), bob, al
 
 // --- Requirements refuse an offer before anything is held ------------------
 
-// The art in these tests alternates two colours pixel by pixel, so it is two
-// colours with the larger holding 379 of the 757: a hair over half.
+// The art in these tests alternates two colors pixel by pixel, so it is two
+// colors with the larger holding 379 of the 757: a hair over half.
 let picky = policyMemory(
     { OPEN with min_colors = ?3; max_coverage = ?50; nsfw = ? #disallowed },
     false,
@@ -180,8 +180,8 @@ assert (Map.size(picky.replay) == 0);
 let ?pickyDesign = Designs.get(picky, 1) else Runtime.trap("design missing");
 assert (pickyDesign.next_serial == 1);
 
-// Three colours clears the minimum, but one of them covers 400 of 757.
-let threeColours : Wire.Art = {
+// Three colors clears the minimum, but one of them covers 400 of 757.
+let threeColors : Wire.Art = {
     shape_id = Shape.SHAPE_ID;
     palette = [0x101010, 0xffffff, 0x7fd1c1];
     pixels = Blob.fromArray(
@@ -194,7 +194,7 @@ let threeColours : Wire.Art = {
 switch (
     Trades.acceptInbound(
         picky,
-        inbound(requestId(21), 1, { offeredChip(bob, 4, 21) with art = threeColours }),
+        inbound(requestId(21), 1, { offeredChip(bob, 4, 21) with art = threeColors }),
         bob,
         alice,
         310,
@@ -205,8 +205,8 @@ switch (
 };
 
 // Spread more evenly it clears the cap, but the tag refuses it.
-let evenColours : Wire.Art = {
-    threeColours with
+let evenColors : Wire.Art = {
+    threeColors with
     pixels = Blob.fromArray(
         Array.tabulate<Nat8>(Shape.PIXEL_COUNT, func(i) { Nat8.fromNat(i % 3) })
     )
@@ -217,7 +217,7 @@ switch (
         inbound(
             requestId(22),
             1,
-            { offeredChip(bob, 4, 22) with art = evenColours; nsfw = true },
+            { offeredChip(bob, 4, 22) with art = evenColors; nsfw = true },
         ),
         bob,
         alice,
@@ -232,7 +232,7 @@ switch (
 switch (
     Trades.acceptInbound(
         picky,
-        inbound(requestId(23), 1, { offeredChip(bob, 4, 23) with art = evenColours }),
+        inbound(requestId(23), 1, { offeredChip(bob, 4, 23) with art = evenColors }),
         bob,
         alice,
         330,
@@ -248,7 +248,7 @@ let wantsTagged = policyMemory({ OPEN with nsfw = ? #required }, true);
 switch (
     Trades.acceptInbound(
         wantsTagged,
-        inbound(requestId(24), 1, { offeredChip(bob, 4, 24) with art = evenColours }),
+        inbound(requestId(24), 1, { offeredChip(bob, 4, 24) with art = evenColors }),
         bob,
         alice,
         340,
@@ -272,7 +272,7 @@ assert (Map.size(pickyApproving.incoming) == 0);
 switch (
     Trades.acceptInbound(
         pickyApproving,
-        inbound(requestId(26), 1, { offeredChip(bob, 4, 26) with art = evenColours }),
+        inbound(requestId(26), 1, { offeredChip(bob, 4, 26) with art = evenColors }),
         bob,
         alice,
         360,
@@ -289,7 +289,7 @@ let tagged = policyMemory(OPEN, true);
 switch (
     Trades.acceptInbound(
         tagged,
-        inbound(requestId(27), 1, { offeredChip(bob, 4, 27) with art = evenColours }),
+        inbound(requestId(27), 1, { offeredChip(bob, 4, 27) with art = evenColors }),
         bob,
         alice,
         370,
@@ -305,7 +305,7 @@ switch (Designs.setTradePolicy(tagged, 1, OPEN, false)) {
 switch (
     Trades.acceptInbound(
         tagged,
-        inbound(requestId(27), 1, { offeredChip(bob, 4, 27) with art = evenColours }),
+        inbound(requestId(27), 1, { offeredChip(bob, 4, 27) with art = evenColors }),
         bob,
         alice,
         380,

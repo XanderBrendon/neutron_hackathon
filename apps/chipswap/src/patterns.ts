@@ -30,7 +30,7 @@ export type Generator = {
   render: (options: GeneratorOptions) => Uint8Array;
 };
 
-const CENTRE = DIAMETER / 2;
+const CENTER = DIAMETER / 2;
 const RADIUS = DIAMETER / 2 + 0.04;
 
 const BANDS_PARAM: GeneratorParam = {
@@ -49,7 +49,7 @@ const ROTATION_PARAM: GeneratorParam = {
   step: 15,
 };
 
-function colourFor(options: GeneratorOptions, band: number): number {
+function colorFor(options: GeneratorOptions, band: number): number {
   const palette = options.paletteIndices;
   return palette[band % palette.length]!;
 }
@@ -59,14 +59,14 @@ function eachPixel(
   band: (dx: number, dy: number, x: number, y: number) => number,
 ): Uint8Array {
   if (options.paletteIndices.length === 0) {
-    throw new Error("A generator needs at least one palette colour");
+    throw new Error("A generator needs at least one palette color");
   }
   const pixels = new Uint8Array(PIXEL_COUNT);
   for (let index = 0; index < PIXEL_COUNT; index += 1) {
     const { x, y } = pixelPosition(index);
-    const dx = x + 0.5 - CENTRE;
-    const dy = y + 0.5 - CENTRE;
-    pixels[index] = colourFor(options, band(dx, dy, x, y));
+    const dx = x + 0.5 - CENTER;
+    const dy = y + 0.5 - CENTER;
+    pixels[index] = colorFor(options, band(dx, dy, x, y));
   }
   return pixels;
 }
@@ -79,7 +79,7 @@ export const GENERATORS: readonly Generator[] = [
   {
     id: "rings",
     label: "Concentric rings",
-    description: "Bands of colour measured out from the centre.",
+    description: "Bands of color measured out from the center.",
     params: [BANDS_PARAM],
     render: (options) => {
       const bands = bandCount(options);
@@ -92,7 +92,7 @@ export const GENERATORS: readonly Generator[] = [
   {
     id: "spokes",
     label: "Spokes",
-    description: "Wedges of colour swept around the centre.",
+    description: "Wedges of color swept around the center.",
     params: [BANDS_PARAM, ROTATION_PARAM],
     render: (options) => {
       const bands = bandCount(options);
@@ -108,7 +108,7 @@ export const GENERATORS: readonly Generator[] = [
   {
     id: "grid",
     label: "Pixel grid",
-    description: "A checker of the first two selected colours.",
+    description: "A checker of the first two selected colors.",
     params: [BANDS_PARAM],
     render: (options) =>
       eachPixel(options, (_dx, _dy, x, y) => (x + y) % 2),

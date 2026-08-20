@@ -96,7 +96,7 @@ export function paint(
   stroke: "none" | "begin" | "extend" = "none",
 ): EditorState {
   if (colorIndex < 0 || colorIndex >= state.palette.length) {
-    throw new Error(`Colour ${colorIndex} is not in the palette`);
+    throw new Error(`Color ${colorIndex} is not in the palette`);
   }
   const pixels = Uint8Array.from(state.pixels);
   let changed = false;
@@ -167,8 +167,8 @@ export function lockAll(state: EditorState): EditorState {
 
 /**
  * A whole chip proposed at once: a generated pattern, or an image stamped over
- * the artwork. A pattern may bring colours of its own, which is how a
- * photograph lands on a chip that has never seen those colours.
+ * the artwork. A pattern may bring colors of its own, which is how a
+ * photograph lands on a chip that has never seen those colors.
  */
 export type Pattern = {
   pixels: Uint8Array;
@@ -181,40 +181,40 @@ function checkPattern(state: EditorState, pattern: Pattern): void {
     throw new Error(`A pattern has exactly ${PIXEL_COUNT} pixels`);
   }
   if (pattern.palette.length > MAX_PALETTE) {
-    throw new Error(`A palette holds at most ${MAX_PALETTE} colours`);
+    throw new Error(`A palette holds at most ${MAX_PALETTE} colors`);
   }
   if (!pattern.palette.every(isHexColor)) {
-    throw new Error("A pattern palette must be lowercase #rrggbb colours");
+    throw new Error("A pattern palette must be lowercase #rrggbb colors");
   }
-  // The palette may grow, but the colours already on the chip have to keep
-  // their index: a locked pixel is never written to, so if its colour moved it
+  // The palette may grow, but the colors already on the chip have to keep
+  // their index: a locked pixel is never written to, so if its color moved it
   // would change anyway, without anything having touched it.
-  if (state.palette.some((colour, index) => pattern.palette[index] !== colour)) {
+  if (state.palette.some((color, index) => pattern.palette[index] !== color)) {
     throw new Error("A pattern palette must extend the chip's own palette");
   }
   for (const value of pattern.pixels) {
     if (value >= pattern.palette.length) {
-      throw new Error("A pattern pixel refers to a colour outside the palette");
+      throw new Error("A pattern pixel refers to a color outside the palette");
     }
   }
 }
 
 /**
  * Whether a pattern still lines up with this chip. A preview held open across
- * an edit can go stale — removing a palette colour renumbers the pixels — and
- * a stale preview is dropped rather than drawn against the wrong colours.
+ * an edit can go stale — removing a palette color renumbers the pixels — and
+ * a stale preview is dropped rather than drawn against the wrong colors.
  */
 export function patternFits(state: EditorState, pattern: Pattern): boolean {
   return (
     pattern.pixels.length === PIXEL_COUNT &&
     pattern.palette.length <= MAX_PALETTE &&
-    state.palette.every((colour, index) => pattern.palette[index] === colour)
+    state.palette.every((color, index) => pattern.palette[index] === color)
   );
 }
 
 /**
- * Whether the chip is showing exactly this pattern, colours and all. It is how
- * a step in the history is recognised after the fact: undoing off a state that
+ * Whether the chip is showing exactly this pattern, colors and all. It is how
+ * a step in the history is recognized after the fact: undoing off a state that
  * matches what a stamp produced is undoing that stamp, however many steps later
  * it happens.
  */
@@ -222,14 +222,14 @@ export function patternShowing(state: EditorState, pattern: Pattern): boolean {
   return (
     state.pixels.length === pattern.pixels.length &&
     state.palette.length === pattern.palette.length &&
-    state.palette.every((colour, index) => pattern.palette[index] === colour) &&
+    state.palette.every((color, index) => pattern.palette[index] === color) &&
     state.pixels.every((value, index) => pattern.pixels[index] === value)
   );
 }
 
 /**
  * The chip as the pattern would leave it, so a preview shows what applying it
- * really does: locked pixels keep the colour they have.
+ * really does: locked pixels keep the color they have.
  */
 export function previewPattern(state: EditorState, pattern: Pattern): Uint8Array {
   checkPattern(state, pattern);
@@ -256,7 +256,7 @@ export function applyPattern(state: EditorState, pattern: Pattern): EditorState 
 
 export function addPaletteColor(state: EditorState, color: string): EditorState {
   if (!isHexColor(color)) {
-    throw new Error(`Expected a lowercase #rrggbb colour, received "${color}"`);
+    throw new Error(`Expected a lowercase #rrggbb color, received "${color}"`);
   }
   const existing = state.palette.indexOf(color);
   if (existing >= 0) return { ...state, activeColor: existing };
@@ -277,7 +277,7 @@ export function canRemovePaletteColor(state: EditorState, index: number): boolea
 }
 
 /**
- * Removes an unused colour and renumbers the pixels above it. A colour still on
+ * Removes an unused color and renumbers the pixels above it. A color still on
  * the chip is kept: dropping it would silently repaint the artwork.
  */
 export function removePaletteColor(state: EditorState, index: number): EditorState {

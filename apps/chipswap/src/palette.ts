@@ -1,4 +1,4 @@
-// Palette colours. The wire form is exactly "#rrggbb" in lowercase, which is
+// Palette colors. The wire form is exactly "#rrggbb" in lowercase, which is
 // what the backend validates, so anything else is rejected rather than guessed.
 
 export const MAX_PALETTE = 64;
@@ -13,7 +13,7 @@ export function isHexColor(value: string): boolean {
 
 export function parseHexColor(value: string): Rgb {
   if (!isHexColor(value)) {
-    throw new Error(`Expected a lowercase #rrggbb colour, received "${value}"`);
+    throw new Error(`Expected a lowercase #rrggbb color, received "${value}"`);
   }
   return {
     r: Number.parseInt(value.slice(1, 3), 16),
@@ -30,7 +30,7 @@ export function formatHexColor(rgb: Rgb): string {
   return `#${channel(rgb.r)}${channel(rgb.g)}${channel(rgb.b)}`;
 }
 
-/** Linear blend; the ratio clamps so a slider can never invent a colour. */
+/** Linear blend; the ratio clamps so a slider can never invent a color. */
 export function blendColors(left: string, right: string, ratio: number): string {
   const from = parseHexColor(left);
   const to = parseHexColor(right);
@@ -42,7 +42,7 @@ export function blendColors(left: string, right: string, ratio: number): string 
   });
 }
 
-/** Readable foreground for a swatch, so labels stay legible on any colour. */
+/** Readable foreground for a swatch, so labels stay legible on any color. */
 export function contrastColor(value: string): string {
   const { r, g, b } = parseHexColor(value);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;

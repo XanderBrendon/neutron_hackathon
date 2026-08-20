@@ -1,5 +1,5 @@
 // The region a fill would cover: the pixel under the pointer and every pixel
-// touching it, edge to edge, that carries the same colour. Diagonals do not
+// touching it, edge to edge, that carries the same color. Diagonals do not
 // connect, so two blocks meeting at a corner stay two blocks.
 //
 // Locked pixels are walls rather than holes. Nothing writes to a locked pixel
@@ -38,7 +38,7 @@ export function floodRegion(
       const next = pixelIndexAt(x + dx, y + dy);
       if (next === null || seen[next] === 1) continue;
       // Marked on the way in, so a pixel the fill turns away from is not
-      // examined again from every other neighbour it has.
+      // examined again from every other neighbor it has.
       seen[next] = 1;
       if (locks[next] === 1 || pixels[next] !== target) continue;
       queue.push(next);

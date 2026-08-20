@@ -5,7 +5,7 @@
 // underneath. A third can sit beneath both, holding a picture being placed for
 // a stamp; while it is there the artwork steps back so the picture reads. Both follow the circular mask, so the corners of the square are
 // blank rather than looking like cells nobody is allowed to paint. The optional
-// centreline accent is the same geometry drawn heavier over the middle row and
+// centerline accent is the same geometry drawn heavier over the middle row and
 // column.
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -49,9 +49,9 @@ const strokeEdges = (
 export type HoverPreview = {
   /** Every chip pixel the brush covers, outlined to show where it sits. */
   cells: number[];
-  /** The subset a click would actually change, tinted with `colour`. */
+  /** The subset a click would actually change, tinted with `color`. */
   changes: number[];
-  colour: string;
+  color: string;
 };
 
 /**
@@ -107,7 +107,7 @@ export const ChipCanvas = ({
     if (!context) return;
 
     const image = context.createImageData(DIAMETER, DIAMETER);
-    const colours = palette.map((entry) => {
+    const colors = palette.map((entry) => {
       try {
         return parseHexColor(entry);
       } catch {
@@ -123,10 +123,10 @@ export const ChipCanvas = ({
           image.data[offset + 3] = 0;
           continue;
         }
-        const colour = colours[pixels[index] ?? 0] ?? { r: 0, g: 0, b: 0 };
-        image.data[offset] = colour.r;
-        image.data[offset + 1] = colour.g;
-        image.data[offset + 2] = colour.b;
+        const color = colors[pixels[index] ?? 0] ?? { r: 0, g: 0, b: 0 };
+        image.data[offset] = color.r;
+        image.data[offset + 1] = color.g;
+        image.data[offset + 2] = color.b;
         image.data[offset + 3] = 255;
       }
     }
@@ -159,7 +159,7 @@ export const ChipCanvas = ({
     if (!context) return;
     context.clearRect(0, 0, canvas.width, canvas.height);
 
-    // An odd line width lands crisply when centred half a pixel off the cell
+    // An odd line width lands crisply when centered half a pixel off the cell
     // boundary; an even one lands crisply on the boundary itself.
     const thin = (step: number) => Math.round(step * scale) + 0.5;
     const thick = (step: number) => Math.round(step * scale);
@@ -186,7 +186,7 @@ export const ChipCanvas = ({
     const preview = hover && hoverPreview ? hoverPreview(hover.x, hover.y) : null;
     if (preview) {
       context.globalAlpha = 0.6;
-      context.fillStyle = preview.colour;
+      context.fillStyle = preview.color;
       for (const index of preview.changes) {
         const { x, y } = pixelPosition(index);
         context.fillRect(x * scale, y * scale, scale, scale);

@@ -32,22 +32,22 @@ export function rowOffsets(): number[] {
   return [...ROW_OFFSETS];
 }
 
-/** Row start column for chip-local coordinates: each row is centred. */
+/** Row start column for chip-local coordinates: each row is centered. */
 export function rowStart(row: number): number {
   return (DIAMETER - ROW_WIDTHS[row]!) / 2;
 }
 
-/** Rasterise a circle the way Planning/circle-bench_1.html does, for the check. */
+/** Rasterize a circle the way Planning/circle-bench_1.html does, for the check. */
 export function maskRowWidths(diameter: number, eps: number): number[] {
-  const centre = diameter / 2;
+  const center = diameter / 2;
   const radius = diameter / 2 + eps;
   const squared = radius * radius;
   const widths: number[] = [];
   for (let y = 0; y < diameter; y += 1) {
-    const dy = y + 0.5 - centre;
+    const dy = y + 0.5 - center;
     let count = 0;
     for (let x = 0; x < diameter; x += 1) {
-      const dx = x + 0.5 - centre;
+      const dx = x + 0.5 - center;
       if (dx * dx + dy * dy <= squared) count += 1;
     }
     widths.push(count);
@@ -97,7 +97,7 @@ export function maskEdges(): MaskEdge[] {
   const edges: MaskEdge[] = [];
   for (const { x, y } of maskCells()) {
     // The left and top edges belong to this cell; the right and bottom ones
-    // belong to the neighbour, unless there is no neighbour to draw them.
+    // belong to the neighbor, unless there is no neighbor to draw them.
     edges.push({ orientation: "vertical", x, y });
     edges.push({ orientation: "horizontal", x, y });
     if (pixelIndexAt(x + 1, y) === null) {

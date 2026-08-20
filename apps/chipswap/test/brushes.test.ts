@@ -8,8 +8,8 @@ import {
   stamp,
 } from "../src/brushes.ts";
 
-const CENTRE_X = 15;
-const CENTRE_Y = 15;
+const CENTER_X = 15;
+const CENTER_Y = 15;
 
 test("the preset library covers the shapes the editor offers", () => {
   const ids = PRESET_BRUSHES.map((brush) => brush.id);
@@ -23,13 +23,13 @@ test("the preset library covers the shapes the editor offers", () => {
 });
 
 test("stamping covers exactly the brush cells inside the mask", () => {
-  expect(stamp(presetBrush("dot"), CENTRE_X, CENTRE_Y)).toEqual([
-    pixelIndexAt(CENTRE_X, CENTRE_Y)!,
+  expect(stamp(presetBrush("dot"), CENTER_X, CENTER_Y)).toEqual([
+    pixelIndexAt(CENTER_X, CENTER_Y)!,
   ]);
-  expect(stamp(presetBrush("square3"), CENTRE_X, CENTRE_Y)).toHaveLength(9);
-  expect(stamp(presetBrush("square2"), CENTRE_X, CENTRE_Y)).toHaveLength(4);
-  expect(stamp(presetBrush("cross"), CENTRE_X, CENTRE_Y)).toHaveLength(5);
-  expect(stamp(presetBrush("ex"), CENTRE_X, CENTRE_Y)).toHaveLength(5);
+  expect(stamp(presetBrush("square3"), CENTER_X, CENTER_Y)).toHaveLength(9);
+  expect(stamp(presetBrush("square2"), CENTER_X, CENTER_Y)).toHaveLength(4);
+  expect(stamp(presetBrush("cross"), CENTER_X, CENTER_Y)).toHaveLength(5);
+  expect(stamp(presetBrush("ex"), CENTER_X, CENTER_Y)).toHaveLength(5);
 });
 
 test("a stamp never paints outside the chip", () => {
@@ -45,9 +45,9 @@ test("a stamp never paints outside the chip", () => {
 });
 
 test("the anchor lands on the pointer pixel", () => {
-  const pointer = pixelIndexAt(CENTRE_X, CENTRE_Y)!;
+  const pointer = pixelIndexAt(CENTER_X, CENTER_Y)!;
   for (const brush of PRESET_BRUSHES) {
-    expect(stamp(brush, CENTRE_X, CENTRE_Y)).toContain(pointer);
+    expect(stamp(brush, CENTER_X, CENTER_Y)).toContain(pointer);
   }
 });
 
@@ -64,7 +64,7 @@ test("custom brushes round-trip through the backend record form", () => {
   expect(restored.id).toBe("custom-7");
   expect(restored.name).toBe("Plus");
   expect([...restored.cells]).toEqual([...brush.cells]);
-  expect(stamp(restored, CENTRE_X, CENTRE_Y)).toEqual(stamp(brush, CENTRE_X, CENTRE_Y));
+  expect(stamp(restored, CENTER_X, CENTER_Y)).toEqual(stamp(brush, CENTER_X, CENTER_Y));
 });
 
 test("a malformed brush record is rejected", () => {

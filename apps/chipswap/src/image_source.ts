@@ -13,7 +13,7 @@ export type LoadedImage = {
   raster: Raster;
   /** The same pixels as a canvas, for drawing the picture under the chip. */
   source: HTMLCanvasElement;
-  /** The size it arrived at, which is what the person recognises. */
+  /** The size it arrived at, which is what the person recognizes. */
   width: number;
   height: number;
 };
