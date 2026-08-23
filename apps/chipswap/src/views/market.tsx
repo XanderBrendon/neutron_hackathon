@@ -2,12 +2,10 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { cx } from "neutron-design-system";
 import {
   errorMessage,
-  fetchCatalogs,
-  formatTimestamp,
   loadCollection,
   loadDesigns,
   loadDirectory,
-  loadStore,
+  formatMsTimestamp,
   proposeTrade,
   shortPrincipal,
   type Chip,
@@ -15,8 +13,15 @@ import {
   type DirectoryEntry,
   type MarketFilter,
   type Status,
-  type StoreRow,
 } from "../api.ts";
+import { loadCachedCatalogs, refreshCatalogs } from "../catalog_client.ts";
+import {
+  buildMarketPage,
+  ownedKey,
+  type MarketRow,
+} from "../market_page.ts";
+import { CATALOG_TTL_MS, staleDesigners } from "../resident/freshness.ts";
+import type { CachedCatalog } from "../resident/store.ts";
 import { ChipCanvas } from "../chip_canvas.tsx";
 import { decodePixels } from "../chip.ts";
 import {
@@ -39,7 +44,6 @@ import {
 } from "../requirements.ts";
 
 const PAGE_SIZE = 24;
-const BATCH = 8;
 const DIRECTORY_PAGE = 100;
 // A whole directory is 512 entries, so this is the walk's ceiling rather than a
 // sample of it: a designer missing from the picker would look like a designer
@@ -48,6 +52,26 @@ const DIRECTORY_CEILING = 512;
 // Long enough that typing a word does not cost a query per keystroke, short
 // enough that the market does not feel like it is lagging behind the box.
 const SEARCH_DEBOUNCE_MS = 250;
+
+// A whole directory is 512 entries, so the walk reads all of them rather than
+// a sample: a designer missing from the picker would look like a designer with
+// nothing to show.
+async function loadWholeDirectory(): Promise<DirectoryEntry[]> {
+  const found: DirectoryEntry[] = [];
+  let cursor = 0;
+  for (;;) {
+    const page = await loadDirectory(cursor, DIRECTORY_PAGE);
+    found.push(...page.entries);
+    cursor += page.entries.length;
+    if (
+      page.entries.length === 0 ||
+      cursor >= page.total ||
+      cursor >= DIRECTORY_CEILING
+    ) {
+      return found;
+    }
+  }
+}
 
 type Props = {
   status: Status | null;
@@ -61,35 +85,115 @@ export const Market = ({ status, onChanged }: Props) => {
   // filter is what the market was actually asked for.
   const [searchDraft, setSearchDraft] = useState("");
   const [designers, setDesigners] = useState<DirectoryEntry[]>([]);
-  const [rows, setRows] = useState<StoreRow[]>([]);
-  const [total, setTotal] = useState(0);
-  const [nsfwHidden, setNsfwHidden] = useState(0);
   const [offset, setOffset] = useState(0);
   const [failure, setFailure] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
-  const [offerFor, setOfferFor] = useState<StoreRow | null>(null);
+  const [offerFor, setOfferFor] = useState<MarketRow | null>(null);
   const [ownDesigns, setOwnDesigns] = useState<Design[]>([]);
   const [heldChips, setHeldChips] = useState<Chip[]>([]);
 
-  const reload = useCallback(
-    async (nextFilter: MarketFilter, nextOffset: number) => {
-      try {
-        const page = await loadStore(nextFilter, nextOffset, PAGE_SIZE);
-        setRows(page.rows);
-        setTotal(page.total);
-        setNsfwHidden(page.nsfwHidden);
-        setFailure(null);
-      } catch (error) {
-        setFailure(errorMessage(error));
-      }
-    },
-    [],
-  );
+  // Everything the page is built from. The catalogs come from this machine's
+  // cache; the rest comes from the canister, which is the only thing that knows
+  // what we hold and who we follow.
+  const [catalogs, setCatalogs] = useState<CachedCatalog[]>([]);
+  const [ownedKeys, setOwnedKeys] = useState<Set<string>>(new Set());
+  const [collection, setCollection] = useState<Chip[]>([]);
+  const [allDesigns, setAllDesigns] = useState<Design[]>([]);
+  const [loaded, setLoaded] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      const [cached, directory, held, designs] = await Promise.all([
+        loadCachedCatalogs(),
+        loadWholeDirectory(),
+        loadCollection(0, DIRECTORY_PAGE),
+        loadDesigns(),
+      ]);
+      setCatalogs(cached);
+      setDesigners(directory);
+      setCollection(held.chips);
+      setAllDesigns(designs);
+      setOwnedKeys(
+        new Set(held.chips.map((chip) => ownedKey(chip.designer, chip.designId))),
+      );
+      setFailure(null);
+    } catch (error) {
+      setFailure(errorMessage(error));
+    } finally {
+      setLoaded(true);
+    }
+  }, []);
 
   useEffect(() => {
-    void reload(filter, offset);
-  }, [filter, offset, reload, status?.revision]);
+    void load();
+  }, [load, status?.revision]);
+
+  // Rendered from what is already here, so a filter change is instant and does
+  // not wait on the network. `total` is the filtered count, which is what the
+  // page control below needs to stay honest.
+  const page = useMemo(
+    () =>
+      buildMarketPage(
+        {
+          catalogs,
+          directory: designers,
+          ownedKeys,
+          holdings: collection.filter((chip) => chip.origin === "held"),
+          ownDesigns: allDesigns,
+        },
+        filter,
+        offset,
+        PAGE_SIZE,
+      ),
+    [catalogs, designers, ownedKeys, collection, allDesigns, filter, offset],
+  );
+  const rows = page.rows;
+  const total = page.total;
+  const nsfwHidden = page.nsfwHidden;
+
+  // Only a designer with something cached can put a row here, so those are the
+  // only ones the picker offers. A designer whose catalog has not been fetched
+  // yet would look like one with nothing to show.
+  const pickable = useMemo(() => {
+    const stocked = new Set(
+      catalogs
+        .filter((entry) => entry.designs.length > 0)
+        .map((entry) => entry.designer),
+    );
+    return designers.filter(
+      (entry) =>
+        !entry.ignored && !entry.retired && stocked.has(entry.canister),
+    );
+  }, [catalogs, designers]);
+
+  // Show what is cached first, then bring the stale peers up to date behind it.
+  // Opening the market on a machine that fetched yesterday should show
+  // yesterday's chips at once, not a spinner.
+  useEffect(() => {
+    if (!loaded) return;
+    const eligible = designers
+      .filter((entry) => !entry.ignored && !entry.retired)
+      .map((entry) => entry.canister);
+    const stale = staleDesigners(eligible, catalogs, Date.now(), CATALOG_TTL_MS);
+    if (stale.length === 0) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        await refreshCatalogs(stale, false);
+        if (!cancelled) setCatalogs(await loadCachedCatalogs());
+      } catch (error) {
+        // A refresh that could not run leaves the cached market on screen.
+        if (!cancelled) setFailure(errorMessage(error));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // Deliberately keyed on `loaded` and the directory rather than on
+    // `catalogs`: refreshing writes catalogs, and watching them here would
+    // start the next refresh from the result of the last one.
+  }, [loaded, designers]);
 
   useEffect(() => {
     if (searchDraft === filter.search) return;
@@ -99,36 +203,6 @@ export const Market = ({ status, onChanged }: Props) => {
     }, SEARCH_DEBOUNCE_MS);
     return () => clearTimeout(timer);
   }, [filter.search, searchDraft]);
-
-  // Only the designers who have something cached can put a row in the market,
-  // so those are the only ones the picker offers.
-  useEffect(() => {
-    void (async () => {
-      try {
-        const found: DirectoryEntry[] = [];
-        let cursor = 0;
-        for (;;) {
-          const page = await loadDirectory(cursor, DIRECTORY_PAGE);
-          found.push(...page.entries);
-          cursor += page.entries.length;
-          if (
-            page.entries.length === 0 ||
-            cursor >= page.total ||
-            cursor >= DIRECTORY_CEILING
-          ) {
-            break;
-          }
-        }
-        setDesigners(
-          found.filter(
-            (entry) => !entry.ignored && !entry.retired && entry.designCount > 0,
-          ),
-        );
-      } catch (error) {
-        setFailure(errorMessage(error));
-      }
-    })();
-  }, [status?.revision]);
 
   // Takes the change as a function of the current filter rather than a value,
   // so a facet toggled from a stale render cannot undo the one before it. Every
@@ -150,38 +224,32 @@ export const Market = ({ status, onChanged }: Props) => {
     setFailure(null);
     setMessage(null);
     try {
-      const directory = await loadDirectory(0, 100);
-      // The backend drops these too, but filtering here keeps them from
-      // consuming slots in a batch that is capped at eight.
-      const targets = directory.entries
+      const targets = designers
         .filter((entry) => !entry.ignored && !entry.retired)
         .map((entry) => entry.canister);
       if (targets.length === 0) {
         setMessage(
-          directory.total === 0
+          designers.length === 0
             ? "Add a designer in the Directory first."
             : "Every designer in your directory is ignored or retired.",
         );
         return;
       }
-      let fetched = 0;
-      let failed = 0;
-      // The manifest caps one batch at eight peers, so walk the directory.
-      for (let index = 0; index < targets.length; index += BATCH) {
-        const slice = targets.slice(index, index + BATCH);
-        const result = await fetchCatalogs(slice);
-        fetched += result.fetched.length;
-        failed += result.failed.length;
-      }
+      // Asked for by hand, so every designer is re-read regardless of how
+      // recently the last one landed. Batching is the background's business.
+      const result = await refreshCatalogs(targets, true);
+      setCatalogs(await loadCachedCatalogs());
       // Silence here is reported and nothing more. A catalog read is a query,
       // and a designer who did not answer one has not thereby been judged
       // gone — that conclusion is drawn on the paid routes, and shows up as
       // the retired badge in the Directory rather than here.
       setMessage(
-        `Refreshed ${fetched} designer${fetched === 1 ? "" : "s"}` +
-          (failed > 0 ? `, ${failed} did not answer.` : "."),
+        `Refreshed ${result.fetched.length} designer` +
+          `${result.fetched.length === 1 ? "" : "s"}` +
+          (result.failed.length > 0
+            ? `, ${result.failed.length} did not answer.`
+            : "."),
       );
-      await reload(filter, offset);
       await onChanged();
     } catch (error) {
       setFailure(errorMessage(error));
@@ -190,7 +258,7 @@ export const Market = ({ status, onChanged }: Props) => {
     }
   };
 
-  const openOffer = async (row: StoreRow) => {
+  const openOffer = async (row: MarketRow) => {
     setOfferFor(row);
     setMessage(null);
     setFailure(null);
@@ -211,7 +279,7 @@ export const Market = ({ status, onChanged }: Props) => {
   // says which chip is wrong rather than only that something was.
   const offerFailure = useCallback(
     (
-      row: StoreRow,
+      row: MarketRow,
       candidate: { art: { palette: string[]; pixels: string }; nsfw: boolean },
     ): FailureCode | null =>
       check(
@@ -242,7 +310,7 @@ export const Market = ({ status, onChanged }: Props) => {
   );
 
   const propose = async (
-    row: StoreRow,
+    row: MarketRow,
     offer: { kind: "own"; designId: number } | { kind: "held"; chipKey: string },
   ) => {
     setBusy(true);
@@ -256,7 +324,7 @@ export const Market = ({ status, onChanged }: Props) => {
       });
       setMessage(describeOutcome(result.outcome));
       setOfferFor(null);
-      await reload(filter, offset);
+      await load();
       await onChanged();
     } catch (error) {
       setFailure(errorMessage(error));
@@ -349,7 +417,7 @@ export const Market = ({ status, onChanged }: Props) => {
               value={filter.designer ?? ""}
             >
               <option value="">All designers</option>
-              {designers.map((entry) => (
+              {pickable.map((entry) => (
                 <option key={entry.canister} value={entry.canister}>
                   {entry.contactName ?? shortPrincipal(entry.canister)}
                 </option>
@@ -453,7 +521,7 @@ export const Market = ({ status, onChanged }: Props) => {
                 <PolicyBadges nsfw={row.nsfw} requirements={row.requirements} />
                 {row.owned ? <span className="nt-tag nt-tag--success">owned</span> : null}
                 <span className="nt-meta">
-                  seen {formatTimestamp(row.fetchedAtNs)}
+                  seen {formatMsTimestamp(row.fetchedAtMs)}
                 </span>
                 <button
                   className="nt-button nt-button--sm"

@@ -5,8 +5,9 @@ import {
   MAX_SEARCH_CHARS,
   defaultFilter,
   filterLabel,
+  canonicalFacets,
   isDefaultFilter,
-  serializeFilter,
+  normalizedSearch,
   toggleFacet,
 } from "../src/market_filter.ts";
 
@@ -57,47 +58,30 @@ test("toggling a facet adds it, and toggling it again takes it away", () => {
 });
 
 // The facets are a set, so the order a reader ticked them in must not change
-// what the backend is asked or make two equal filters look different.
-test("facets serialize in a fixed order however they were ticked", () => {
-  expect(
-    serializeFilter({ ...defaultFilter(), requirements: ["approval", "open"] })
-      .requirements,
-  ).toEqual(["open", "approval"]);
+// which designs match or make two equal filters look different.
+test("facets canonicalize to a fixed order however they were ticked", () => {
+  expect(canonicalFacets(["approval", "open"])).toEqual(["open", "approval"]);
+  expect(canonicalFacets(["min_colors", "tradeable"])).toEqual([
+    "tradeable",
+    "min_colors",
+  ]);
 });
 
-test("serialization uses the backend field names", () => {
-  expect(
-    serializeFilter({
-      hideOwned: true,
-      showNsfw: true,
-      requirements: ["tradeable", "min_colors"],
-      designer: "aaaaa-aa",
-      search: "  Moon  ",
-      sort: "title",
-    }),
-  ).toEqual({
-    ownership: "not_owned",
-    nsfw: "show",
-    requirements: ["tradeable", "min_colors"],
-    designer: "aaaaa-aa",
-    search: "Moon",
-    sort: "title",
-  });
+test("a repeated facet is the same set as naming it once", () => {
+  expect(canonicalFacets(["open", "open"])).toEqual(["open"]);
 });
 
-// The two checkbox axes are the ones whose wire values are not the word the
-// reader saw, so each is worth pinning in both positions.
-test("the checkboxes map onto the ownership and tag axes the backend knows", () => {
-  const shown = serializeFilter({ ...defaultFilter(), hideOwned: false, showNsfw: true });
-  expect(shown.ownership).toBe("all");
-  expect(shown.nsfw).toBe("show");
-  const hidden = serializeFilter(defaultFilter());
-  expect(hidden.ownership).toBe("not_owned");
-  expect(hidden.nsfw).toBe("hide");
+test("no facet ticked canonicalizes to no constraint", () => {
+  expect(canonicalFacets([])).toEqual([]);
 });
 
-test("a search of nothing but spaces asks the backend for nothing", () => {
-  expect(serializeFilter({ ...defaultFilter(), search: "   " }).search).toBe("");
+test("a search of nothing but spaces narrows nothing", () => {
+  expect(normalizedSearch("   ")).toBe("");
+});
+
+test("a search keeps its inner spacing and loses only its edges", () => {
+  expect(normalizedSearch("  Moon  ")).toBe("Moon");
+  expect(normalizedSearch("  blue moon  ")).toBe("blue moon");
 });
 
 test("the label names only the axes that are narrowing the view", () => {
@@ -123,16 +107,10 @@ test("the label names only the axes that are narrowing the view", () => {
   );
 });
 
-test("no designer picked asks the backend about every designer", () => {
-  expect(serializeFilter(defaultFilter()).designer).toBe("");
-});
-
-// The backend refuses a search past its ceiling rather than truncating it, and
-// an empty market is a worse answer than a shorter search, so the ceiling is
-// applied here too.
-test("a search past the backend ceiling is cut to it rather than refused", () => {
+// A search longer than the ceiling says nothing a shorter one does not, and an
+// empty market is a worse answer than a shorter search, so it is cut to fit
+// rather than refused.
+test("a search past the ceiling is cut to it rather than refused", () => {
   const long = "a".repeat(MAX_SEARCH_CHARS + 10);
-  expect(serializeFilter({ ...defaultFilter(), search: long }).search).toHaveLength(
-    MAX_SEARCH_CHARS,
-  );
+  expect(normalizedSearch(long)).toHaveLength(MAX_SEARCH_CHARS);
 });

@@ -5,8 +5,7 @@ import {
   addDirectoryEntry,
   crawlStep,
   errorMessage,
-  fetchCatalogs,
-  formatTimestamp,
+  formatMsTimestamp,
   loadDirectory,
   loadSuggestions,
   removeDirectoryEntry,
@@ -20,8 +19,32 @@ import {
   type Status,
   type Suggestion,
 } from "../api.ts";
+import {
+  evictCatalogs,
+  loadCachedCatalogs,
+  refreshCatalogs,
+} from "../catalog_client.ts";
+import type { CachedCatalog } from "../resident/store.ts";
 
 const PAGE_SIZE = 25;
+
+/** A designer this machine has never asked is not a designer with no designs. */
+function designCountOf(cached: CachedCatalog | undefined): string {
+  if (cached === undefined || cached.fetchedAtMs === 0) return "not fetched";
+  return String(cached.designs.length);
+}
+
+function lastFetchOf(cached: CachedCatalog | undefined): string {
+  if (cached === undefined) return "not fetched";
+  // A peer still on the old caller policy lands here, and so does one that is
+  // simply down. Naming it is what keeps their chips from vanishing from the
+  // market for no stated reason.
+  if (cached.fetchedAtMs === 0) {
+    return cached.lastError === null ? "not fetched" : "didn't answer";
+  }
+  const when = formatMsTimestamp(cached.fetchedAtMs);
+  return cached.lastError === null ? when : `${when} (didn't answer since)`;
+}
 
 type Props = {
   status: Status | null;
@@ -44,16 +67,35 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
   // state update would not be visible to a closure already running.
   const stopping = useRef(false);
 
-  const reload = useCallback(async (nextOffset: number) => {
+  // What this machine has fetched. The canister stopped counting designs when
+  // it stopped storing them, so the two right-hand columns are answered from
+  // the browser's own copy — and say "not fetched" where there is none, which
+  // is a true statement where a zero would have been a false one.
+  const [catalogs, setCatalogs] = useState<Map<string, CachedCatalog>>(new Map());
+
+  const reloadCatalogs = useCallback(async () => {
     try {
-      const page = await loadDirectory(nextOffset, PAGE_SIZE);
-      setEntries(page.entries);
-      setTotal(page.total);
-      setFailure(null);
+      const cached = await loadCachedCatalogs();
+      setCatalogs(new Map(cached.map((entry) => [entry.designer, entry])));
     } catch (error) {
       setFailure(errorMessage(error));
     }
   }, []);
+
+  const reload = useCallback(
+    async (nextOffset: number) => {
+      try {
+        const page = await loadDirectory(nextOffset, PAGE_SIZE);
+        setEntries(page.entries);
+        setTotal(page.total);
+        setFailure(null);
+      } catch (error) {
+        setFailure(errorMessage(error));
+      }
+      await reloadCatalogs();
+    },
+    [reloadCatalogs],
+  );
 
   const reloadSuggestions = useCallback(async (term: string) => {
     try {
@@ -394,19 +436,19 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                         </span>
                       ) : null}
                     </td>
-                    <td>{entry.designCount}</td>
-                    <td>
-                      {entry.lastCatalogNs
-                        ? formatTimestamp(entry.lastCatalogNs)
-                        : "never"}
-                    </td>
+                    <td>{designCountOf(catalogs.get(entry.canister))}</td>
+                    <td>{lastFetchOf(catalogs.get(entry.canister))}</td>
                     <td className="nt-cluster">
                       <button
                         className="nt-button nt-button--sm"
                         disabled={busy || entry.ignored || entry.retired}
                         onClick={() =>
                           void run(async () => {
-                            const result = await fetchCatalogs([entry.canister]);
+                            const result = await refreshCatalogs(
+                              [entry.canister],
+                              true,
+                            );
+                            await reloadCatalogs();
                             return result.fetched.length > 0
                               ? "Catalog refreshed."
                               : "That designer did not answer.";
@@ -428,6 +470,9 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                               entry.canister,
                               !entry.retired,
                             );
+                            if (!entry.retired) {
+                              await evictCatalogs([entry.canister]);
+                            }
                             return entry.retired
                               ? "Back in the rotation. Refresh to see whether they answer."
                               : "Marked retired. They will not be called again.";
@@ -449,8 +494,11 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                               entry.canister,
                               !entry.ignored,
                             );
+                            if (!entry.ignored) {
+                              await evictCatalogs([entry.canister]);
+                            }
                             return entry.ignored
-                              ? "Back in the store after the next refresh."
+                              ? "Back in the market after the next refresh."
                               : "Ignored. Their chips will not be fetched or shown.";
                           })
                         }
@@ -464,6 +512,10 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                         onClick={() =>
                           void run(async () => {
                             await removeDirectoryEntry(entry.canister);
+                            // Their catalog goes with them: a designer the
+                            // owner stopped following should not leave their
+                            // chips on this machine.
+                            await evictCatalogs([entry.canister]);
                             return "Removed from your directory.";
                           })
                         }

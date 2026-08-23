@@ -9,7 +9,6 @@ import { querySelf, updateSelf, type JsonValue } from "neutron-tools/app";
 import { PIXEL_COUNT } from "./chip.ts";
 import { isHexColor } from "./palette.ts";
 import type { NsfwRule, TradeRequirements } from "./requirements.ts";
-import { serializeFilter } from "./market_filter.ts";
 import type { MarketFilter } from "./market_filter.ts";
 
 export type { NsfwRule, TradeRequirements, MarketFilter };
@@ -80,7 +79,6 @@ export type Status = {
   holdings: number;
   holdingsLimit: number;
   directoryCount: number;
-  catalogDesigners: number;
   incomingPending: number;
   outgoingActive: number;
   crawl: CrawlProgress;
@@ -99,8 +97,6 @@ export type DirectoryEntry = {
   ignored: boolean;
   retired: boolean;
   strikes: number;
-  lastCatalogNs: string | null;
-  designCount: number;
   ownsChip: boolean;
   contactName: string | null;
 };
@@ -114,19 +110,6 @@ export type CrawlProgress = {
   discovered: number;
   remaining: number;
   full: boolean;
-};
-
-export type StoreRow = {
-  designer: string;
-  designId: number;
-  title: string;
-  art: Art;
-  requirements: TradeRequirements;
-  nsfw: boolean;
-  designRevision: number;
-  owned: boolean;
-  fetchedAtNs: string;
-  contactName: string | null;
 };
 
 export type IncomingTrade = {
@@ -370,7 +353,6 @@ export function parseStatus(value: unknown): Status {
     holdings: natNumber(source.holdings, "holdings"),
     holdingsLimit: natNumber(source.holdings_limit, "holdings limit"),
     directoryCount: natNumber(source.directory_count, "directory count"),
-    catalogDesigners: natNumber(source.catalog_designers, "catalog designers"),
     incomingPending: natNumber(source.incoming_pending, "incoming pending"),
     outgoingActive: natNumber(source.outgoing_active, "outgoing active"),
     crawl: parseCrawlProgress(source.crawl),
@@ -392,8 +374,6 @@ export function parseDirectoryEntry(value: unknown): DirectoryEntry {
     ignored: bool(source.ignored, "ignored flag"),
     retired: bool(source.retired, "retired flag"),
     strikes: natNumber(source.strikes, "strike count"),
-    lastCatalogNs: optionalNs(source.last_catalog_ns, "last catalog"),
-    designCount: natNumber(source.design_count, "design count"),
     ownsChip: bool(source.owns_chip, "ownership flag"),
     contactName: optionalText(source.contact_name, "contact name"),
   };
@@ -407,22 +387,6 @@ export function parseCrawlProgress(value: unknown): CrawlProgress {
     discovered: natNumber(source.discovered, "discovered count"),
     remaining: natNumber(source.remaining, "remaining count"),
     full: bool(source.full, "directory full flag"),
-  };
-}
-
-export function parseStoreRow(value: unknown): StoreRow {
-  const source = record(value, "store row");
-  return {
-    designer: text(source.designer, "designer"),
-    designId: natNumber(source.design_id, "design id"),
-    title: text(source.title, "title"),
-    art: parseArt(source.art),
-    requirements: parseRequirements(source.requirements),
-    nsfw: bool(source.nsfw, "NSFW tag"),
-    designRevision: natNumber(source.design_revision, "design revision"),
-    owned: bool(source.owned, "owned flag"),
-    fetchedAtNs: nsText(source.fetched_at_ns, "fetch time"),
-    contactName: optionalText(source.contact_name, "contact name"),
   };
 }
 
@@ -564,30 +528,6 @@ export async function loadDirectory(
   return {
     entries: list(value.entries, "directory list").map(parseDirectoryEntry),
     total: natNumber(value.total, "total"),
-  };
-}
-
-// Named for `chipswap_store`, the backend method it wraps. The page it reads is
-// the Market, and the backend route keeps the older name.
-export async function loadStore(
-  filter: MarketFilter,
-  offset: number,
-  limit: number,
-): Promise<{ rows: StoreRow[]; total: number; nsfwHidden: number }> {
-  const value = record(
-    await querySelf("chipswap_store", [
-      {
-        ...serializeFilter(filter),
-        offset: String(offset),
-        limit: String(limit),
-      },
-    ] as unknown as JsonValue[]),
-    "market page",
-  );
-  return {
-    rows: list(value.rows, "store rows").map(parseStoreRow),
-    total: natNumber(value.total, "total"),
-    nsfwHidden: natNumber(value.nsfw_hidden, "hidden count"),
   };
 }
 
@@ -816,25 +756,6 @@ export async function stopCrawl(): Promise<CrawlProgress> {
   );
 }
 
-export async function fetchCatalogs(
-  canisters: string[],
-): Promise<{ fetched: string[]; failed: string[] }> {
-  const value = unwrap(
-    await updateSelf("chipswap_fetch_catalogs", [
-      { canisters },
-    ] as unknown as JsonValue[]),
-    "catalog refresh",
-  );
-  return {
-    fetched: list(value.fetched, "fetched list").map((entry) =>
-      text(entry, "canister id"),
-    ),
-    failed: list(value.failed, "failed list").map((entry) =>
-      text(entry, "canister id"),
-    ),
-  };
-}
-
 export async function proposeTrade(input: {
   peer: string;
   wantDesignId: number;
@@ -891,6 +812,12 @@ export function formatTimestamp(ns: string): string {
   } catch {
     return "unknown";
   }
+}
+
+/** Wall-clock milliseconds, as the browser's own cache records them. */
+export function formatMsTimestamp(ms: number): string {
+  if (!Number.isFinite(ms) || ms <= 0) return "never";
+  return new Date(ms).toLocaleString();
 }
 
 export function shortPrincipal(value: string): string {

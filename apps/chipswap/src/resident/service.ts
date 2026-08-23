@@ -12,6 +12,9 @@ import { evict, readAll, write, type CachedCatalog } from "./store.ts";
  *  forty-designer directory does not open forty sockets at once. */
 export const MAX_REFRESH_CONCURRENCY = 8;
 
+/** The app-state topic an open Market listens on. */
+export const CATALOG_TOPIC = "catalogs";
+
 function principals(value: unknown): string[] {
   if (!Array.isArray(value)) return [];
   return value.filter((entry): entry is string => typeof entry === "string");
@@ -66,8 +69,14 @@ async function refresh(
   );
 
   // One notification for the batch, so an open Market re-reads once rather
-  // than once per peer.
-  if (fetched.length > 0 || failed.length > 0) publishAppStateChange();
+  // than once per peer. The revision is the moment the batch finished: the
+  // cache has no counter of its own, and every open tile only needs to know
+  // that what it read is now older than what is stored.
+  if (fetched.length > 0 || failed.length > 0) {
+    await publishAppStateChange(CATALOG_TOPIC, Date.now()).catch(() => {
+      // A tile that missed the nudge still reloads when it is next opened.
+    });
+  }
   return { fetched, failed };
 }
 

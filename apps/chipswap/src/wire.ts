@@ -78,7 +78,7 @@ class Reader {
       this.failed = true;
       return 0;
     }
-    const value = this.bytes[this.offset];
+    const value = this.bytes[this.offset] ?? 0;
     this.offset += 1;
     return value;
   }

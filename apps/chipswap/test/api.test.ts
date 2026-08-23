@@ -15,7 +15,6 @@ import {
   parseOutgoingTrade,
   parseStatus,
   parseRequirements,
-  parseStoreRow,
   parseSuggestion,
   shortPrincipal,
 } from "../src/api.ts";
@@ -256,7 +255,7 @@ test("crawl progress counts what is left, not only what is done", () => {
   ).toThrow();
 });
 
-test("directory and market rows carry the ownership flags the filters use", () => {
+test("a directory entry carries the flags the market and the crawl read", () => {
   const entry = parseDirectoryEntry({
     canister: "aaaaa-aa",
     source: "trade",
@@ -265,7 +264,6 @@ test("directory and market rows carry the ownership flags the filters use", () =
     ignored: true,
     retired: false,
     strikes: "2",
-    design_count: "3",
     owns_chip: false,
   });
   expect(entry.ignored).toBe(true);
@@ -273,28 +271,12 @@ test("directory and market rows carry the ownership flags the filters use", () =
   // a designer going quiet before the conclusion is drawn.
   expect(entry.retired).toBe(false);
   expect(entry.strikes).toBe(2);
-  expect(entry.lastCatalogNs).toBeNull();
   expect(entry.ownsChip).toBe(false);
-
-  const row = parseStoreRow({
-    designer: "aaaaa-aa",
-    design_id: "2",
-    title: "Peer chip",
-    art: ART,
-    requirements: { approval: false, min_colors: "3", nsfw: "any" },
-    nsfw: true,
-    design_revision: "1",
-    owned: true,
-    fetched_at_ns: "9",
-    contact_name: "Grace",
-  });
-  expect(row.owned).toBe(true);
-  expect(row.contactName).toBe("Grace");
-  // The row carries the whole policy, because the market pre-checks an offer
-  // against it before paying for a call.
-  expect(row.requirements.minColors).toBe(3);
-  expect(row.requirements.maxCoverage).toBeNull();
-  expect(row.nsfw).toBe(true);
+  // The design count and the last fetch are no longer the canister's to
+  // report. They describe what this machine has read, and the Directory view
+  // reads them from the browser cache instead.
+  expect(entry).not.toHaveProperty("designCount");
+  expect(entry).not.toHaveProperty("lastCatalogNs");
 });
 
 test("trades parse in both directions", () => {

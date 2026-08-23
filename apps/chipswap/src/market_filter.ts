@@ -1,16 +1,15 @@
-// The market filter axes. The backend applies them so `total` stays correct for
-// the filtered set, which means the tile only has to name them.
+// The market filter axes.
 //
-// Two of the axes are checkboxes whose wire value is not the word the reader
-// saw: "hide chips I own" is the `not_owned` ownership axis, and "show NSFW" is
-// the tag axis. Both are written out in `serializeFilter` rather than at the
-// call site so there is one place that knows the translation.
+// The backend used to apply these; it has no catalog to apply them to any
+// more, so `src/market_page.ts` applies them over the browser's copy and this
+// file is left owning the axes themselves: what they are, what they are called
+// in the interface, and what a set of them reads as.
 
 /**
- * The longest search the backend will answer. This is the tile's copy of
- * `MAX_SEARCH_CHARS` in `backend/Directory.mo`, which refuses a longer one
- * outright; a shorter search is a better answer than an empty market, so it is
- * cut to fit here rather than sent to be refused.
+ * The longest search the market reads. Filtering happens in the tile now, so
+ * this is a UI bound rather than a backend one: a search longer than this says
+ * nothing a shorter one does not, and the cap keeps one very long paste from
+ * scanning every row against it.
  */
 export const MAX_SEARCH_CHARS = 64;
 
@@ -100,25 +99,20 @@ function canonical(facets: readonly RequirementFacet[]): RequirementFacet[] {
   );
 }
 
-/** Exactly the field names the backend query expects. */
-export function serializeFilter(filter: MarketFilter): {
-  ownership: string;
-  nsfw: string;
-  requirements: string[];
-  designer: string;
-  search: string;
-  sort: string;
-} {
-  return {
-    ownership: filter.hideOwned ? "not_owned" : "all",
-    nsfw: filter.showNsfw ? "show" : "hide",
-    requirements: canonical(filter.requirements),
-    // An empty string is the backend's "no constraint" for both of these: a
-    // designer nobody picked and a search nobody typed.
-    designer: filter.designer ?? "",
-    search: filter.search.trim().slice(0, MAX_SEARCH_CHARS),
-    sort: filter.sort,
-  };
+/** The search as the filter actually applies it: trimmed, and cut to fit. */
+export function normalizedSearch(search: string): string {
+  return search.trim().slice(0, MAX_SEARCH_CHARS);
+}
+
+/**
+ * The ticked facets in the canonical order, with repeats collapsed. A set of
+ * choices has no order of its own, so giving it one keeps two equal filters
+ * from reading as different ones.
+ */
+export function canonicalFacets(
+  facets: readonly RequirementFacet[],
+): RequirementFacet[] {
+  return canonical(facets);
 }
 
 export function filterLabel(filter: MarketFilter): string {
