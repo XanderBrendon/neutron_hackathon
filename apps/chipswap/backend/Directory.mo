@@ -7,7 +7,7 @@ import Principal "mo:core/Principal";
 import Text "mo:core/Text";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v8";
+import Memory "./memory/chipswap/v9";
 
 // The designer directory: who the owner knows, and what we have concluded
 // about them.

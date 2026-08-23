@@ -13,7 +13,7 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v8";
+import Memory "./memory/chipswap/v9";
 import PrincipalText "./PrincipalText";
 import Requirements "./Requirements";
 import Shape "./Shape";
@@ -867,19 +867,6 @@ module {
             #ok({ revision = mem.revision });
         };
 
-        public func /*update*/chipswap_trade_forget(
-            request : TradeRequestRef
-        ) : RevisionResult {
-            let ?requestId = Trades.unhex(request.request_id) else return #err(error("invalid_request"));
-            switch (Trades.forgetOutgoing(mem, requestId)) {
-                case (#err(code)) #err(error(code));
-                case (#ok(())) {
-                    bump();
-                    #ok({ revision = mem.revision });
-                };
-            };
-        };
-
         // --- What a crawl brings back ----------------------------------------
 
         // The result of one crawl, seated in one call.
@@ -1199,7 +1186,7 @@ module {
                     };
                 };
             };
-            if (delivered) ignore Trades.completeDelivery(mem, delivery.request_id);
+            if (delivered) ignore Trades.completeDelivery(mem, delivery.request_id, self, Time.now());
             bump();
             #ok({
                 request_id = requestIdText;
@@ -1458,9 +1445,6 @@ module {
         switch (state) {
             case (#sending) ("sending", null);
             case (#pending_designer) ("pending_designer", null);
-            case (#completed(_)) ("completed", null);
-            case (#declined(reason)) ("declined", ?reason);
-            case (#failed(code)) ("failed", ?code);
             case (#uncertain) ("uncertain", null);
         };
     };

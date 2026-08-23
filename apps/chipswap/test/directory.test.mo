@@ -8,7 +8,7 @@ import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v8";
+import Memory "../backend/memory/chipswap/v9";
 import Shape "../backend/Shape";
 
 func principalOf(seed : Nat) : Principal {

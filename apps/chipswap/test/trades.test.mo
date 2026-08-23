@@ -8,7 +8,7 @@ import Text "mo:core/Text";
 import Designs "../backend/Designs";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v8";
+import Memory "../backend/memory/chipswap/v9";
 import Shape "../backend/Shape";
 import Trades "../backend/Trades";
 import Wire "../backend/Wire";
@@ -361,8 +361,14 @@ switch (Trades.statusOf(manual, manualRequest, bob, alice)) {
     case (_) Runtime.trap("expected minted status");
 };
 assert (expectErr(Trades.acceptPending(manual, manualRequest, alice, 320)) == "not_pending");
-assert (expectOk(Trades.completeDelivery(manual, manualRequest)) == ());
+assert (expectOk(Trades.completeDelivery(manual, manualRequest, alice, 330)) == ());
 assert (Trades.pendingIncoming(manual).size() == 0);
+// The row left the live table for the ledger, which is where the owner now
+// reads what they traded.
+let manualRecord = Trades.historyPage(manual, 0, 10);
+assert (manualRecord.total == 1);
+assert (manualRecord.entries[0].direction == #incoming);
+assert (manualRecord.entries[0].outcome == #traded);
 // The outcome survives the record, so a late status query still answers.
 switch (Trades.statusOf(manual, manualRequest, bob, alice)) {
     case (#minted(payload)) assert (payload.chip.serial == 1);
@@ -391,8 +397,18 @@ switch (declined.outcome) {
 // We never keep a declined offer.
 assert (Holdings.count(declining) == 0);
 assert (Trades.statusOf(declining, declineRequest, bob, alice) == #declined({ reason = "designer_declined" }));
-assert (expectOk(Trades.completeDelivery(declining, declineRequest)) == ());
+assert (expectOk(Trades.completeDelivery(declining, declineRequest, alice, 420)) == ());
 assert (Trades.pendingIncoming(declining).size() == 0);
+// An offer we turned down is a record too, and it still names their chip: that
+// is the whole content of the row.
+let declineRecord = Trades.historyPage(declining, 0, 10);
+assert (declineRecord.total == 1);
+assert (declineRecord.entries[0].outcome == #declined_by_owner);
+assert (declineRecord.entries[0].ours == null);
+switch (declineRecord.entries[0].theirs) {
+    case (?chip) assert (chip.ref.serial == 2);
+    case null Runtime.trap("the refused chip was not recorded");
+};
 
 // --- Proposing: own designs mint, acquired chips are escrowed -------------
 

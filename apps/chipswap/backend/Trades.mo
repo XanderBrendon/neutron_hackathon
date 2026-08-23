@@ -10,7 +10,7 @@ import Text "mo:core/Text";
 import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v8";
+import Memory "./memory/chipswap/v9";
 import Requirements "./Requirements";
 import Shape "./Shape";
 import Wire "./Wire";
@@ -28,6 +28,7 @@ module {
     public let MAX_INCOMING : Nat = 64;
     public let MAX_OUTGOING : Nat = 32;
     public let MAX_REPLAY : Nat = 256;
+    public let MAX_HISTORY : Nat = 256;
     public let REQUEST_ID_BYTES : Nat = 16;
     public let MAX_PEER_DESIGN_ID : Nat = 1_000;
 
@@ -236,20 +237,12 @@ module {
             };
             case (#declined(payload)) {
                 restoreOffer(mem, trade);
-                setOutgoing(
-                    mem,
-                    key,
-                    { trade with state = #declined(bounded(payload.reason)); updated_at_ns = now },
-                );
+                settleOutgoing(mem, key, trade, null, #declined_by_peer(bounded(payload.reason)), now);
                 #ok("declined");
             };
             case (#err(payload)) {
                 restoreOffer(mem, trade);
-                setOutgoing(
-                    mem,
-                    key,
-                    { trade with state = #failed(bounded(payload.code)); updated_at_ns = now },
-                );
+                settleOutgoing(mem, key, trade, null, #failed(bounded(payload.code)), now);
                 #ok("failed");
             };
         };
@@ -264,13 +257,17 @@ module {
         now : Int,
     ) : Result<Text> {
         let key = outgoingKey(requestId);
-        let ?trade = Map.get(mem.outgoing, Text.compare, key) else return #err("unknown_trade");
+        let ?trade = Map.get(mem.outgoing, Text.compare, key) else {
+            // The row is gone because the trade already settled. Saying so is
+            // what stops the peer retrying; `unknown_trade` would not.
+            if (settledOutgoing(mem, requestId, caller)) return #ok("already_final");
+            return #err("unknown_trade");
+        };
         if (not Principal.equal(trade.peer, caller)) return #err("unknown_trade");
         switch (trade.state) {
             case (#sending) return #err("not_pending");
             case (#pending_designer) {};
             case (#uncertain) {};
-            case (_) return #ok("already_final");
         };
         switch (outcome) {
             case (#minted(chip)) {
@@ -284,20 +281,12 @@ module {
                     chip.serial != trade.offered_ref.serial
                 ) return #err("invalid_delivery");
                 restoreOffer(mem, trade);
-                setOutgoing(
-                    mem,
-                    key,
-                    { trade with state = #declined("returned"); updated_at_ns = now },
-                );
+                settleOutgoing(mem, key, trade, null, #declined_by_peer("returned"), now);
                 #ok("returned");
             };
             case (#declined) {
                 restoreOffer(mem, trade);
-                setOutgoing(
-                    mem,
-                    key,
-                    { trade with state = #declined("designer_declined"); updated_at_ns = now },
-                );
+                settleOutgoing(mem, key, trade, null, #declined_by_peer("designer_declined"), now);
                 #ok("declined");
             };
         };
@@ -315,7 +304,7 @@ module {
         switch (trade.state) {
             case (#uncertain) {};
             case (#pending_designer) {};
-            case (_) return #err("not_resolvable");
+            case (#sending) return #err("not_resolvable");
         };
         let ?answer = reply else return #ok("uncertain");
         switch (answer) {
@@ -324,11 +313,7 @@ module {
                 // record means the offer was never admitted and the chip is
                 // safe to restore.
                 restoreOffer(mem, trade);
-                setOutgoing(
-                    mem,
-                    key,
-                    { trade with state = #failed("not_received"); updated_at_ns = now },
-                );
+                settleOutgoing(mem, key, trade, null, #failed("not_received"), now);
                 #ok("not_received");
             };
             case (#pending) {
@@ -347,11 +332,7 @@ module {
             };
             case (#declined(payload)) {
                 restoreOffer(mem, trade);
-                setOutgoing(
-                    mem,
-                    key,
-                    { trade with state = #declined(bounded(payload.reason)); updated_at_ns = now },
-                );
+                settleOutgoing(mem, key, trade, null, #declined_by_peer(bounded(payload.reason)), now);
                 #ok("declined");
             };
         };
@@ -569,9 +550,56 @@ module {
         };
     };
 
-    public func completeDelivery(mem : Memory.Mem, requestId : Blob) : Result<()> {
+    // The single point a settled inbound row is dropped, and therefore the
+    // single point its record is written.
+    public func completeDelivery(
+        mem : Memory.Mem,
+        requestId : Blob,
+        self : Principal,
+        now : Int,
+    ) : Result<()> {
         let ?(key, trade) = findIncoming(mem, requestId) else return #err("unknown_trade");
         if (trade.state == #pending) return #err("not_delivered");
+
+        let theirs : ?Memory.HistoryChip = ?{
+            title = trade.offered.title;
+            ref = trade.offered.ref;
+        };
+        let (ours, outcome) : (?Memory.HistoryChip, Memory.HistoryOutcome) = switch (trade.state) {
+            case (#accepted(details)) {
+                let title = switch (Designs.get(mem, trade.want_design_id)) {
+                    case (?design) design.title;
+                    case null "";
+                };
+                (
+                    ?{
+                        title;
+                        ref = {
+                            designer = self;
+                            design_id = trade.want_design_id;
+                            serial = details.serial;
+                        };
+                    },
+                    #traded,
+                );
+            };
+            // We never minted, and their chip went back to them. The row still
+            // names that chip, because that is the whole content of it.
+            case (_) (null, #declined_by_owner);
+        };
+        ignore recordHistory(
+            mem,
+            #incoming,
+            trade.peer,
+            trade.request_id,
+            trade.want_design_id,
+            ours,
+            theirs,
+            null,
+            outcome,
+            trade.received_at_ns,
+            now,
+        );
         Map.remove(mem.incoming, Text.compare, key);
         #ok(());
     };
@@ -663,22 +691,252 @@ module {
         );
     };
 
-    public func getOutgoing(mem : Memory.Mem, requestId : Blob) : ?Memory.OutgoingTrade {
-        Map.get(mem.outgoing, Text.compare, outgoingKey(requestId));
+    // --- The record of what happened ----------------------------------------
+
+    // Recording a trade can never fail. When the table is full the oldest entry
+    // goes, because the alternative — refusing the new one — throws away the
+    // record the owner is most likely to be looking for.
+    public func recordHistory(
+        mem : Memory.Mem,
+        direction : Memory.HistoryDirection,
+        peer : Principal,
+        requestId : Blob,
+        wantDesignId : Nat,
+        ours : ?Memory.HistoryChip,
+        theirs : ?Memory.HistoryChip,
+        escrowKey : ?Text,
+        outcome : Memory.HistoryOutcome,
+        startedAt : Int,
+        now : Int,
+    ) : Nat {
+        if (Map.size(mem.history) >= MAX_HISTORY) evictOldest(mem);
+        let entryId = mem.next_history_id;
+        mem.next_history_id += 1;
+        Map.add(
+            mem.history,
+            Nat.compare,
+            entryId,
+            {
+                entry_id = entryId;
+                direction;
+                peer;
+                request_id = requestId;
+                want_design_id = wantDesignId;
+                ours;
+                theirs;
+                escrow_key = escrowKey;
+                outcome;
+                started_at_ns = startedAt;
+                settled_at_ns = now;
+            } : Memory.HistoryEntry,
+        );
+        entryId;
     };
 
-    public func forgetOutgoing(mem : Memory.Mem, requestId : Blob) : Result<()> {
-        let key = outgoingKey(requestId);
-        let ?trade = Map.get(mem.outgoing, Text.compare, key) else return #err("unknown_trade");
-        switch (trade.state) {
-            case (#sending) #err("not_final");
-            case (#pending_designer) #err("not_final");
-            case (#uncertain) #err("not_final");
-            case (_) {
-                Map.remove(mem.outgoing, Text.compare, key);
-                #ok(());
+    // Newest first. Ids ascend with time, so they are the whole sort key; the
+    // sort is written out rather than leaning on the map's iteration order,
+    // which is how `Holdings.page` does it too.
+    public func historyPage(
+        mem : Memory.Mem,
+        offset : Nat,
+        limit : Nat,
+    ) : { entries : [Memory.HistoryEntry]; total : Nat } {
+        let all = Array.sort<(Nat, Memory.HistoryEntry)>(
+            Map.toArray(mem.history),
+            func(left, right) { Nat.compare(right.0, left.0) },
+        );
+        let total = all.size();
+        if (offset >= total or limit == 0) return { entries = []; total };
+        let available : Nat = total - offset;
+        let take = if (limit < available) limit else available;
+        {
+            entries = Array.tabulate<Memory.HistoryEntry>(take, func(i) { all[offset + i].1 });
+            total;
+        };
+    };
+
+    public func forgetHistory(mem : Memory.Mem, entryId : Nat) : Result<()> {
+        let ?_entry = Map.get(mem.history, Nat.compare, entryId) else {
+            return #err("unknown_entry");
+        };
+        Map.remove(mem.history, Nat.compare, entryId);
+        #ok(());
+    };
+
+    // An unresolved entry is the last thing naming a chip that is still
+    // `#uncertain` in holdings, so a bulk clear leaves it alone. Forgetting one
+    // by hand stays allowed: the owner may genuinely want it gone.
+    public func clearHistory(mem : Memory.Mem) : Nat {
+        var removed = 0;
+        for ((entryId, entry) in Map.toArray(mem.history).values()) {
+            if (entry.outcome != #unresolved) {
+                Map.remove(mem.history, Nat.compare, entryId);
+                removed += 1;
             };
         };
+        removed;
+    };
+
+    public func findUnresolved(mem : Memory.Mem, requestId : Blob) : ?Memory.HistoryEntry {
+        let target = hex(requestId);
+        for ((_, entry) in Map.entries(mem.history)) {
+            if (
+                entry.direction == #outgoing and
+                entry.outcome == #unresolved and
+                hex(entry.request_id) == target
+            ) return ?entry;
+        };
+        null;
+    };
+
+    // Whether a settled record already answers for this request. A peer
+    // retrying a delivery we have already dealt with has to be told the trade
+    // finished, or it retries forever.
+    public func settledOutgoing(
+        mem : Memory.Mem,
+        requestId : Blob,
+        peer : Principal,
+    ) : Bool {
+        let target = hex(requestId);
+        for ((_, entry) in Map.entries(mem.history)) {
+            if (
+                entry.direction == #outgoing and
+                Principal.equal(entry.peer, peer) and
+                hex(entry.request_id) == target
+            ) return true;
+        };
+        false;
+    };
+
+    // Setting aside a trade whose outcome was never confirmed. It frees the
+    // slot and records what is known, which is nothing new — so the chip is not
+    // touched. Releasing it here would duplicate a unique chip into the world
+    // every time the guess was wrong, with no way to notice afterwards.
+    public func abandonOutgoing(mem : Memory.Mem, requestId : Blob, now : Int) : Result<()> {
+        let key = outgoingKey(requestId);
+        let ?trade = Map.get(mem.outgoing, Text.compare, key) else return #err("unknown_trade");
+        if (trade.state != #uncertain) return #err("not_uncertain");
+        settleOutgoing(mem, key, trade, null, #unresolved, now);
+        #ok(());
+    };
+
+    // Asking again about a trade the owner had set aside. The entry is rewritten
+    // in place rather than added to, so one trade stays one row.
+    public func resolveUnresolved(
+        mem : Memory.Mem,
+        requestId : Blob,
+        reply : ?Wire.StatusReply,
+        now : Int,
+    ) : Result<Text> {
+        let ?entry = findUnresolved(mem, requestId) else return #err("unknown_trade");
+        let ?answer = reply else return #ok("uncertain");
+        switch (answer) {
+            case (#pending) #ok("pending");
+            case (#unknown) {
+                // The designer records an outcome before returning one, so no
+                // record means the offer was never admitted and the chip is
+                // safe to restore.
+                releaseEscrow(mem, entry);
+                rewriteHistory(mem, entry, null, #failed("not_received"), now);
+                #ok("not_received");
+            };
+            case (#declined(payload)) {
+                releaseEscrow(mem, entry);
+                rewriteHistory(mem, entry, null, #declined_by_peer(bounded(payload.reason)), now);
+                #ok("declined");
+            };
+            case (#minted(payload)) {
+                let chip = payload.chip;
+                if (not Principal.equal(chip.designer, entry.peer)) return #err("invalid_status");
+                if (not validWireChip(chip)) return #err("invalid_reply");
+                if (chip.design_id != entry.want_design_id) return #err("invalid_reply");
+                switch (entry.escrow_key) {
+                    case (?chipKey) ignore Holdings.consume(mem, chipKey);
+                    case null {};
+                };
+                let received = chipFromWire(chip, now);
+                let theirs : ?Memory.HistoryChip = ?{
+                    title = received.title;
+                    ref = received.ref;
+                };
+                switch (Holdings.admit(mem, received)) {
+                    case (#err(code)) {
+                        rewriteHistory(mem, entry, theirs, #failed(code), now);
+                        return #err(code);
+                    };
+                    case (#ok(())) {};
+                };
+                rewriteHistory(mem, entry, theirs, #traded, now);
+                #ok("completed");
+            };
+        };
+    };
+
+    func releaseEscrow(mem : Memory.Mem, entry : Memory.HistoryEntry) {
+        switch (entry.escrow_key) {
+            case (?chipKey) ignore Holdings.release(mem, chipKey);
+            case null {};
+        };
+    };
+
+    func rewriteHistory(
+        mem : Memory.Mem,
+        entry : Memory.HistoryEntry,
+        theirs : ?Memory.HistoryChip,
+        outcome : Memory.HistoryOutcome,
+        now : Int,
+    ) {
+        Map.add(
+            mem.history,
+            Nat.compare,
+            entry.entry_id,
+            { entry with theirs; outcome; settled_at_ns = now },
+        );
+    };
+
+    func evictOldest(mem : Memory.Mem) {
+        var victim : ?Nat = null;
+        for ((entryId, _) in Map.entries(mem.history)) {
+            switch (victim) {
+                case (?current) if (entryId < current) victim := ?entryId;
+                case null victim := ?entryId;
+            };
+        };
+        switch (victim) {
+            case (?entryId) Map.remove(mem.history, Nat.compare, entryId);
+            case null {};
+        };
+    };
+
+    // The one way a terminal outgoing trade is stored: the row leaves the live
+    // table and the record appears, as a single act. Every transition that ends
+    // a trade goes through here, which is what keeps the two in step.
+    func settleOutgoing(
+        mem : Memory.Mem,
+        key : Text,
+        trade : Memory.OutgoingTrade,
+        theirs : ?Memory.HistoryChip,
+        outcome : Memory.HistoryOutcome,
+        now : Int,
+    ) {
+        Map.remove(mem.outgoing, Text.compare, key);
+        ignore recordHistory(
+            mem,
+            #outgoing,
+            trade.peer,
+            trade.request_id,
+            trade.want_design_id,
+            ?{ title = trade.offered_title; ref = trade.offered_ref },
+            theirs,
+            trade.offered_key,
+            outcome,
+            trade.created_at_ns,
+            now,
+        );
+    };
+
+    public func getOutgoing(mem : Memory.Mem, requestId : Blob) : ?Memory.OutgoingTrade {
+        Map.get(mem.outgoing, Text.compare, outgoingKey(requestId));
     };
 
     // --- Internals ----------------------------------------------------------
@@ -729,22 +987,17 @@ module {
             case null {};
         };
         let received = chipFromWire(chip, now);
+        // Their side is known here either way, so the record names it even when
+        // the chip could not be admitted.
+        let theirs : ?Memory.HistoryChip = ?{ title = received.title; ref = received.ref };
         switch (Holdings.admit(mem, received)) {
             case (#err(code)) {
-                setOutgoing(
-                    mem,
-                    key,
-                    { trade with state = #failed(code); updated_at_ns = now },
-                );
+                settleOutgoing(mem, key, trade, theirs, #failed(code), now);
                 return #err(code);
             };
             case (#ok(())) {};
         };
-        setOutgoing(
-            mem,
-            key,
-            { trade with state = #completed(received.ref); updated_at_ns = now },
-        );
+        settleOutgoing(mem, key, trade, theirs, #traded, now);
         #ok("completed");
     };
 
