@@ -353,3 +353,35 @@ test("the manifest and memory versions advanced together", async () => {
   expect(manifest.version).toBe(116);
   expect(manifest.memory?.chipswap?.version).toBe(6);
 });
+
+test("the background ships with a policy that reaches the IC and nothing else", async () => {
+  const html = await readFile(
+    new URL("../dist/web/service.html", import.meta.url),
+    "utf8",
+  );
+
+  // The background needs the gateway; it needs nothing else, and saying so in
+  // the document is what keeps a bundled dependency from reaching further.
+  expect(html).toContain("default-src 'none'");
+  expect(html).toContain("connect-src 'self' https://*.icp0.io");
+  expect(html).toContain("./service.js");
+  // A wildcard host or an inline script would defeat the point.
+  expect(html).not.toMatch(/connect-src[^;]*\s\*/u);
+  expect(html).not.toContain("'unsafe-inline'");
+});
+
+test("peer fetching lives in the background, not in the tile", async () => {
+  const tile = await readFile(jsUrl, "utf8");
+  const background = await readFile(
+    new URL("../dist/web/service.js", import.meta.url),
+    "utf8",
+  );
+
+  // The background is the only surface with persistence, so it is the only one
+  // that should be talking to peers. A tile that also fetched would be a
+  // second, cacheless path to the same data.
+  expect(background).toContain("app_chipswap__chipswap_v1_query");
+  expect(background).toContain("fetchRootKey");
+  expect(tile).not.toContain("app_chipswap__chipswap_v1_query");
+  expect(tile).not.toContain("fetchRootKey");
+});

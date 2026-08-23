@@ -4,19 +4,25 @@ import { sassPlugin } from "esbuild-sass-plugin";
 import { readFile, writeFile } from "node:fs/promises";
 import type { BuildOptions } from "esbuild";
 
-const outfile = "./dist/web/main.js";
+const outdir = "./dist/web";
+const tileBundle = `${outdir}/main.js`;
 
 async function stripRemoteDiagnostics(): Promise<void> {
-  const source = await readFile(outfile, "utf8");
+  const source = await readFile(tileBundle, "utf8");
   const sanitized = source.replaceAll("https://react.dev/errors/", "#react-error-");
   if (sanitized !== source) {
-    await writeFile(outfile, sanitized);
+    await writeFile(tileBundle, sanitized);
   }
 }
 
 const config: BuildOptions = {
-  entryPoints: ["./src/index.tsx"],
-  outfile,
+  // Two browser entrypoints: the tile, and the resident background that owns
+  // the peer catalog cache. They share no runtime state, only modules.
+  entryPoints: [
+    { in: "./src/index.tsx", out: "main" },
+    { in: "./src/resident/service.ts", out: "service" },
+  ],
+  outdir,
   bundle: true,
   minify: true,
   external: [],
