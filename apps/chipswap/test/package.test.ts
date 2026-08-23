@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 120,
+    version: 121,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -64,7 +64,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     // field is.
     memory: {
       chipswap: {
-        version: 8,
+        version: 9,
         schemas: {
           1: { src: "memory/chipswap/v1.mo" },
           2: { src: "memory/chipswap/v2.mo" },
@@ -74,6 +74,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
           6: { src: "memory/chipswap/v6.mo" },
           7: { src: "memory/chipswap/v7.mo" },
           8: { src: "memory/chipswap/v8.mo" },
+          9: { src: "memory/chipswap/v9.mo" },
         },
         migrations: [
           { from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" },
@@ -83,6 +84,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
           { from: 5, to: 6, src: "memory/chipswap/v5_to_v6.mo" },
           { from: 6, to: 7, src: "memory/chipswap/v6_to_v7.mo" },
           { from: 7, to: 8, src: "memory/chipswap/v7_to_v8.mo" },
+          { from: 8, to: 9, src: "memory/chipswap/v8_to_v9.mo" },
         ],
       },
     },
@@ -359,8 +361,42 @@ test("the removed catalog methods are gone from every surface", async () => {
 
 test("the manifest and memory versions advanced together", async () => {
   const manifest = await readManifest();
-  expect(manifest.version).toBe(120);
-  expect(manifest.memory?.chipswap?.version).toBe(8);
+  expect(manifest.version).toBe(121);
+  expect(manifest.memory?.chipswap?.version).toBe(9);
+});
+
+// chipswap_trade_forget cleared terminal rows out of the live outgoing table.
+// There are no terminal rows there any more, so the method went with them — and
+// a preapproved method the tile no longer calls is a method somebody else could.
+test("the old trade-forget route is gone from every surface", async () => {
+  const manifest = await readManifest();
+  const preapproved =
+    manifest.capabilities?.preapproved_self_calls?.methods ?? [];
+  const backend = await readBackend();
+
+  expect(funcMap(manifest)).not.toHaveProperty("chipswap_trade_forget");
+  expect(preapproved).not.toContain("chipswap_trade_forget");
+  expect(backend).not.toContain("chipswap_trade_forget");
+  expect(backend).not.toContain("forgetOutgoing");
+});
+
+// The ledger is read and pruned through its own methods, and every one of them
+// has to be reachable from the tile.
+test("the trade history routes are declared and preapproved", async () => {
+  const manifest = await readManifest();
+  const preapproved =
+    manifest.capabilities?.preapproved_self_calls?.methods ?? [];
+
+  for (const method of [
+    "chipswap_trade_history",
+    "chipswap_history_forget",
+    "chipswap_history_clear",
+    "chipswap_trade_abandon",
+  ]) {
+    expect(funcMap(manifest)).toHaveProperty(method);
+    expect(preapproved).toContain(method);
+  }
+  expect(funcMap(manifest).chipswap_trade_history?.type).toBe("query");
 });
 
 // Retirement was a conclusion this canister drew about a designer from three

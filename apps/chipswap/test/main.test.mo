@@ -6,6 +6,7 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Chipswap "../backend/main";
+import Trades "../backend/Trades";
 import Memory "../backend/memory/chipswap/v9";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
@@ -455,6 +456,90 @@ assert (finalStatus.published_count == 1);
 assert (finalStatus.holdings == 1);
 assert (finalStatus.directory_count == 1);
 
+
+// --- The record a finished trade leaves --------------------------------------
+
+// The ledger is read through its own call rather than riding along with
+// chipswap_trades, which the tile polls for the pending badge.
+let ledgerMemory = Memory.init();
+let ledger = Chipswap.Init(environmentFor(ledgerMemory, self));
+assert (ledger.chipswap_trade_history({ offset = 0; limit = 20 }).total == 0);
+
+let tradedId = Trades.recordHistory(
+    ledgerMemory,
+    #outgoing,
+    peer,
+    "\01\02",
+    3,
+    ?{ title = "Bluebird"; ref = { designer = self; design_id = 1; serial = 2 } },
+    ?{ title = "Ember"; ref = { designer = peer; design_id = 3; serial = 9 } },
+    null,
+    #traded,
+    100,
+    200,
+);
+let stuckId = Trades.recordHistory(
+    ledgerMemory,
+    #outgoing,
+    peer,
+    "\03\04",
+    4,
+    ?{ title = "Ash"; ref = { designer = self; design_id = 2; serial = 1 } },
+    null,
+    ?"escrowed-chip",
+    #unresolved,
+    300,
+    400,
+);
+
+// Newest first, and both sides of the swap come through named.
+let ledgerPage = ledger.chipswap_trade_history({ offset = 0; limit = 20 });
+assert (ledgerPage.total == 2);
+assert (ledgerPage.entries[0].entry_id == stuckId);
+assert (ledgerPage.entries[0].outcome == "unresolved");
+assert (ledgerPage.entries[1].outcome == "traded");
+assert (ledgerPage.entries[1].direction == "outgoing");
+switch (ledgerPage.entries[1].ours) {
+    case (?chip) assert (chip.title == "Bluebird");
+    case null Runtime.trap("our side did not reach the view");
+};
+switch (ledgerPage.entries[1].theirs) {
+    case (?chip) assert (chip.serial == 9);
+    case null Runtime.trap("their side did not reach the view");
+};
+// A trade with nothing on the other side says so rather than inventing one.
+assert (ledgerPage.entries[0].theirs == null);
+
+// Clearing takes the settled rows and leaves the unresolved one, because that
+// entry is the last thing naming a chip that is still committed to a trade.
+switch (ledger.chipswap_history_clear(())) {
+    case (#ok(_)) {};
+    case (#err(error)) Runtime.trap("history_clear: " # error.code);
+};
+let afterClear = ledger.chipswap_trade_history({ offset = 0; limit = 20 });
+assert (afterClear.total == 1);
+assert (afterClear.entries[0].entry_id == stuckId);
+
+// By hand it can still go: the owner may genuinely want it gone.
+switch (ledger.chipswap_history_forget({ entry_id = stuckId })) {
+    case (#ok(_)) {};
+    case (#err(error)) Runtime.trap("history_forget: " # error.code);
+};
+assert (ledger.chipswap_trade_history({ offset = 0; limit = 20 }).total == 0);
+
+// A record that was never here is named as such rather than quietly accepted.
+switch (ledger.chipswap_history_forget({ entry_id = 99_999 })) {
+    case (#ok(_)) Runtime.trap("forgetting a missing record should fail");
+    case (#err(error)) assert (error.code == "unknown_entry");
+};
+
+// Only a trade with an unconfirmed outcome can be set aside, and only one that
+// is actually here.
+switch (ledger.chipswap_trade_abandon({ request_id = "0102" })) {
+    case (#ok(_)) Runtime.trap("abandoning an unknown trade should fail");
+    case (#err(error)) assert (error.code == "unknown_trade");
+};
+ignore tradedId;
 
 // --- What an install starts with ---------------------------------------------
 

@@ -13,6 +13,7 @@ import Migrate5 "../backend/memory/chipswap/v4_to_v5";
 import Migrate6 "../backend/memory/chipswap/v5_to_v6";
 import Migrate7 "../backend/memory/chipswap/v6_to_v7";
 import Migrate8 "../backend/memory/chipswap/v7_to_v8";
+import Migrate9 "../backend/memory/chipswap/v8_to_v9";
 import V1 "../backend/memory/chipswap/v1";
 import V3 "../backend/memory/chipswap/v3";
 import V4 "../backend/memory/chipswap/v4";
@@ -20,6 +21,7 @@ import V5 "../backend/memory/chipswap/v5";
 import V6 "../backend/memory/chipswap/v6";
 import V7 "../backend/memory/chipswap/v7";
 import V8 "../backend/memory/chipswap/v8";
+import V9 "../backend/memory/chipswap/v9";
 
 // Migration from the released schemas, with something in every root. Compiling
 // proves the shapes line up; only this proves the values arrive intact and that
@@ -705,3 +707,56 @@ assert (brush8.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
 // And an emptied directory is still empty at the end of the whole chain.
 let emptied8 = Migrate8.migrate(emptied7);
 assert (Map.size(emptied8.directory) == 0);
+
+// --- V8 -> V9 -----------------------------------------------------------
+
+// The ninth conversion moves settled trades out of the live table. The trade
+// this fixture has carried since V1 is still waiting on its designer, so it
+// stays exactly where it is and the ledger stays empty.
+//
+// That is the case worth pinning. A migration that swept the live table into
+// history to "tidy up" would take the owner's trade out of the list they act
+// on and file it as though it had finished, and nothing would ever deliver it.
+let v9 : V9.Mem = Migrate9.migrate(v8);
+
+assert (v9.revision == v8.revision);
+assert (v9.next_request_seq == v8.next_request_seq);
+assert (v9.next_brush_id == v8.next_brush_id);
+assert (Map.size(v9.directory) == Map.size(v8.directory));
+assert (Map.size(v9.designs) == Map.size(v8.designs));
+assert (Map.size(v9.holdings) == Map.size(v8.holdings));
+assert (Map.size(v9.incoming) == Map.size(v8.incoming));
+assert (Map.size(v9.replay) == Map.size(v8.replay));
+
+// Work in progress stays work in progress, with everything it needs to finish.
+assert (Map.size(v9.outgoing) == 1);
+assert (Map.size(v9.history) == 0);
+assert (v9.next_history_id == 1);
+let ?outbound9 = Map.get(v9.outgoing, Text.compare, "outbound") else Runtime.trap("missing trade");
+assert (outbound9.state == #pending_designer);
+assert (outbound9.offered_key == ?"sent");
+assert (outbound9.offered_title == "Held");
+assert (outbound9.request_id == requestId);
+
+// The owner's ignore survives an eighth conversion.
+let ?carried9 = Map.get(v9.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+assert (carried9.ignored);
+assert (carried9.source == carried8.source);
+
+// And so does everything that was never the trade tables' business.
+let ?draft9 = Map.get(v9.designs, Nat.compare, 3) else Runtime.trap("missing design");
+assert (draft9.state == #draft);
+assert (draft9.art.pixels == Blob.fromArray([0, 1, 0]));
+let ?sent9 = Map.get(v9.holdings, Text.compare, "sent") else Runtime.trap("missing chip");
+switch (sent9.state) {
+    case (#escrowed(details)) assert (details.request_id == requestId);
+    case (_) Runtime.trap("escrow was not preserved");
+};
+let ?replay9 = Map.get(v9.replay, Text.compare, "replay") else Runtime.trap("missing replay");
+assert (replay9.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
+let ?brush9 = List.get(v9.brushes, 0) else Runtime.trap("missing brush");
+assert (brush9.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+// And an emptied directory is still empty at the end of the whole chain.
+let emptied9 = Migrate9.migrate(emptied8);
+assert (Map.size(emptied9.directory) == 0);

@@ -217,6 +217,36 @@ module {
         outgoing : [OutgoingTradeView];
     };
 
+    public type HistoryChipView = {
+        title : Text;
+        designer : Text;
+        design_id : Nat;
+        serial : Nat;
+    };
+
+    // `ours` and `theirs` are the two sides of the swap, and either may be
+    // absent: a peer who declined never minted, and an offer we refused was
+    // never matched. `outcome` is what says whether the chips actually moved.
+    public type TradeHistoryView = {
+        entry_id : Nat;
+        direction : Text;
+        peer : Text;
+        request_id : Text;
+        want_design_id : Nat;
+        ours : ?HistoryChipView;
+        theirs : ?HistoryChipView;
+        outcome : Text;
+        detail : ?Text;
+        started_at_ns : Int;
+        settled_at_ns : Int;
+        contact_name : ?Text;
+    };
+
+    public type TradeHistoryPage = {
+        entries : [TradeHistoryView];
+        total : Nat;
+    };
+
     public type BrushView = {
         id : Nat;
         name : Text;
@@ -331,6 +361,8 @@ module {
     };
 
     public type TradeRequestRef = { request_id : Text };
+
+    public type HistoryEntryRef = { entry_id : Nat };
 
     public type SuggestionRequest = {
         search_text : Text;
@@ -577,6 +609,73 @@ module {
                         };
                     },
                 );
+            };
+        };
+
+        // Kept out of `chipswap_trades` on purpose: that call is polled for the
+        // pending badge, and the ledger has no business riding along with it.
+        public func /*query*/chipswap_trade_history(request : PageRequest) : TradeHistoryPage {
+            let page = Trades.historyPage(mem, request.offset, boundedLimit(request.limit));
+            {
+                entries = Array.map<Memory.HistoryEntry, TradeHistoryView>(
+                    page.entries,
+                    func(entry) {
+                        let (outcome, detail) = historyOutcomeText(entry.outcome);
+                        {
+                            entry_id = entry.entry_id;
+                            direction = switch (entry.direction) {
+                                case (#outgoing) "outgoing";
+                                case (#incoming) "incoming";
+                            };
+                            peer = Principal.toText(entry.peer);
+                            request_id = Trades.hex(entry.request_id);
+                            want_design_id = entry.want_design_id;
+                            ours = historyChipView(entry.ours);
+                            theirs = historyChipView(entry.theirs);
+                            outcome;
+                            detail;
+                            started_at_ns = entry.started_at_ns;
+                            settled_at_ns = entry.settled_at_ns;
+                            contact_name = contactName(entry.peer);
+                        };
+                    },
+                );
+                total = page.total;
+            };
+        };
+
+        public func /*update*/chipswap_history_forget(
+            request : HistoryEntryRef
+        ) : RevisionResult {
+            switch (Trades.forgetHistory(mem, request.entry_id)) {
+                case (#err(code)) #err(error(code));
+                case (#ok(())) {
+                    bump();
+                    #ok({ revision = mem.revision });
+                };
+            };
+        };
+
+        // Clears what is finished. An unresolved entry stays, because it is the
+        // last thing naming a chip that is still committed to a trade.
+        public func /*update*/chipswap_history_clear(()) : RevisionResult {
+            ignore Trades.clearHistory(mem);
+            bump();
+            #ok({ revision = mem.revision });
+        };
+
+        // Frees the slot a trade with an unconfirmed outcome is holding. It
+        // decides nothing: the chip stays committed and the record says so.
+        public func /*update*/chipswap_trade_abandon(
+            request : TradeRequestRef
+        ) : RevisionResult {
+            let ?requestId = Trades.unhex(request.request_id) else return #err(error("invalid_request"));
+            switch (Trades.abandonOutgoing(mem, requestId, Time.now())) {
+                case (#err(code)) #err(error(code));
+                case (#ok(())) {
+                    bump();
+                    #ok({ revision = mem.revision });
+                };
             };
         };
 
@@ -998,10 +1097,20 @@ module {
             request : TradeRequestRef
         ) : async* TradeActionResult {
             let ?requestId = Trades.unhex(request.request_id) else return #err(error("invalid_request"));
-            let ?trade = Trades.getOutgoing(mem, requestId) else return #err(error("unknown_trade"));
+            // A trade the owner set aside is still answerable: its record keeps
+            // the peer and the request id precisely so it can be asked again.
+            let (peer, fromHistory) = switch (Trades.getOutgoing(mem, requestId)) {
+                case (?trade) (trade.peer, false);
+                case null {
+                    let ?entry = Trades.findUnresolved(mem, requestId) else {
+                        return #err(error("unknown_trade"));
+                    };
+                    (entry.peer, true);
+                };
+            };
             let payload : PeerStatusRequest = { request_id = requestId };
             let reply = await* callRoute(
-                trade.peer,
+                peer,
                 ROUTE_STATUS,
                 to_candid (payload),
                 STATUS_CYCLES,
@@ -1011,7 +1120,12 @@ module {
                 case null null;
                 case (?bytes) Wire.decodeStatusReply(bytes);
             };
-            switch (Trades.resolveOutgoing(mem, requestId, answer, Time.now())) {
+            let settled = if (fromHistory) {
+                Trades.resolveUnresolved(mem, requestId, answer, Time.now());
+            } else {
+                Trades.resolveOutgoing(mem, requestId, answer, Time.now());
+            };
+            switch (settled) {
                 case (#err(code)) {
                     bump();
                     #err(error(code));
@@ -1401,6 +1515,18 @@ module {
             };
         };
 
+        func historyChipView(chip : ?Memory.HistoryChip) : ?HistoryChipView {
+            switch (chip) {
+                case (?value) ?{
+                    title = value.title;
+                    designer = Principal.toText(value.ref.designer);
+                    design_id = value.ref.design_id;
+                    serial = value.ref.serial;
+                };
+                case null null;
+            };
+        };
+
         func bump() {
             mem.revision += 1;
         };
@@ -1446,6 +1572,16 @@ module {
             case (#sending) ("sending", null);
             case (#pending_designer) ("pending_designer", null);
             case (#uncertain) ("uncertain", null);
+        };
+    };
+
+    func historyOutcomeText(outcome : Memory.HistoryOutcome) : (Text, ?Text) {
+        switch (outcome) {
+            case (#traded) ("traded", null);
+            case (#declined_by_peer(reason)) ("declined_by_peer", ?reason);
+            case (#declined_by_owner) ("declined_by_owner", null);
+            case (#failed(code)) ("failed", ?code);
+            case (#unresolved) ("unresolved", null);
         };
     };
 
@@ -1644,8 +1780,9 @@ module {
             case ("not_available") "That chip is committed to another trade.";
             case ("not_pending") "That offer is no longer waiting for a decision.";
             case ("not_delivered") "That offer has not been decided yet.";
-            case ("not_final") "That trade is still in progress.";
             case ("not_resolvable") "That trade has already finished.";
+            case ("unknown_entry") "That record is no longer here.";
+            case ("not_uncertain") "Only a trade with an unconfirmed outcome can be set aside.";
             case ("unreachable") "The other Neutron did not answer.";
             case ("invalid_reply") "The other Neutron sent an answer this app cannot trust.";
             case ("invalid_status") "The status answer did not match this trade.";
@@ -1689,6 +1826,18 @@ public type chipswap_directory_Output = DirectoryPage;
 public type chipswap_trades_Input = (());
 public type chipswap_trades_Output = TradesView;
 
+public type chipswap_trade_history_Input = (request : PageRequest);
+public type chipswap_trade_history_Output = TradeHistoryPage;
+
+public type chipswap_history_forget_Input = (request : HistoryEntryRef);
+public type chipswap_history_forget_Output = RevisionResult;
+
+public type chipswap_history_clear_Input = (());
+public type chipswap_history_clear_Output = RevisionResult;
+
+public type chipswap_trade_abandon_Input = (request : TradeRequestRef);
+public type chipswap_trade_abandon_Output = RevisionResult;
+
 public type chipswap_brushes_Input = (());
 public type chipswap_brushes_Output = [BrushView];
 
@@ -1724,9 +1873,6 @@ public type chipswap_brush_save_Output = RevisionResult;
 
 public type chipswap_brush_delete_Input = (request : BrushRequest);
 public type chipswap_brush_delete_Output = RevisionResult;
-
-public type chipswap_trade_forget_Input = (request : TradeRequestRef);
-public type chipswap_trade_forget_Output = RevisionResult;
 
 public type chipswap_directory_note_found_Input = (request : DirectoryFoundRequest);
 public type chipswap_directory_note_found_Output = DirectoryFoundResult;
