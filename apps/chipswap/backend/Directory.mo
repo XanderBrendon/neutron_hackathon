@@ -7,7 +7,7 @@ import Principal "mo:core/Principal";
 import Text "mo:core/Text";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v7";
+import Memory "./memory/chipswap/v8";
 
 // The designer directory: who the owner knows, and what we have concluded
 // about them.
@@ -30,16 +30,22 @@ import Memory "./memory/chipswap/v7";
 // An ignored entry is inert in every outward direction. It is not fetched from,
 // not crawled, and not served to peers, but it is still an entry, so a crawl
 // finding the designer again cannot quietly reinstate them.
-// A retired one behaves identically; the difference is who decided, and that
-// difference is why an inbound proposal may clear `retired` and may never clear
-// `ignored`.
+//
+// It is also the only judgement here, and deliberately the only one. This
+// module used to keep a second flag that meant the same thing outwardly and
+// something quite different inwardly: `retired`, which this canister set for
+// itself after three paid calls a designer failed to answer. It is gone. The
+// kernel does not say why a call was rejected, so that flag was guessing from
+// silence, and a canister briefly stopped was indistinguishable from one
+// uninstalled. Meanwhile the reader that actually notices a dead designer — the
+// browser, fetching catalogs — could never touch it, because a peer who has
+// merely not upgraded refuses a query too.
+//
+// So the judgement is not made here at all now. The browser reports what
+// happened when it asked, the owner reads it, and what they decide arrives as
+// an ignore or a removal. This module keeps decisions; it no longer draws them.
 module {
     public let MAX_DIRECTORY : Nat = 512;
-
-    // Consecutive unanswered calls before we conclude a designer is gone. One
-    // failure is a bad moment; three in a row, with any reply in between
-    // clearing the count, is a canister that no longer answers.
-    public let RETIRE_STRIKES : Nat = 3;
 
     public func get(mem : Memory.Mem, canister : Principal) : ?Memory.DirectoryEntry {
         Map.get(mem.directory, Principal.compare, canister);
@@ -76,8 +82,6 @@ module {
                         first_seen_ns = now;
                         last_seen_ns = now;
                         ignored = false;
-                        retired = false;
-                        strikes = 0;
                     },
                 );
                 true;
@@ -103,18 +107,11 @@ module {
         };
     };
 
-    public func retired(mem : Memory.Mem, canister : Principal) : Bool {
-        switch (get(mem, canister)) {
-            case (?entry) entry.retired;
-            case null false;
-        };
-    };
-
-    // Whether this designer may be approached at all. Both flags mean the same
-    // thing here, which is the point: the trade routes, the page we serve
-    // peers, and the frontier we hand a crawl all ask this one question.
+    // Whether this designer may be approached at all. One flag answers it, and
+    // one question is asked of it: the trade routes, the page we serve peers,
+    // and the frontier we hand a crawl all come through here.
     public func active(entry : Memory.DirectoryEntry) : Bool {
-        not entry.ignored and not entry.retired;
+        not entry.ignored;
     };
 
     public func reachable(mem : Memory.Mem, canister : Principal) : Bool {
@@ -124,89 +121,39 @@ module {
         };
     };
 
-    // A designer answered. Whatever they said, they are there, so the strike
-    // count goes back to zero and a retirement we had concluded is withdrawn.
+    // A designer answered, so we have seen them. That is the whole of what one
+    // call tells us and the whole of what we record.
     public func noteReachable(mem : Memory.Mem, canister : Principal, now : Int) : () {
         let ?existing = get(mem, canister) else return;
         Map.add(
             mem.directory,
             Principal.compare,
             canister,
-            { existing with last_seen_ns = now; strikes = 0; retired = false },
+            { existing with last_seen_ns = now },
         );
     };
 
-    // Which backend-call failure is evidence about the peer rather than about
-    // us. A rejection is their canister declining to run our dispatcher at all;
-    // every other code the broker returns describes something that went wrong on
-    // this side, and striking a designer for our own concurrency limit would be
-    // unjust.
-    public func strikeable(code : Text) : Bool {
-        code == "call_rejected";
-    };
-
     // What one paid call's outcome says about the designer we made it to.
-    // Returns true when this is the outcome that retires them, so the caller
-    // can say so once rather than re-deriving it.
     //
-    // Only the paid update routes may pass through here. A query must never
-    // reach it: those routes exist only from version 108, and a peer on an
-    // older release exposes no query dispatcher at all — retiring them for
-    // having yet to upgrade would be a lie about the one thing this flag
-    // claims to know.
+    // An answer, however garbled, proves a canister ran our dispatcher and
+    // replied — the bytes are the evidence, and whether we could read them is
+    // our problem rather than a fact about them. Silence proves nothing and is
+    // recorded as nothing: the kernel does not say whether the peer refused,
+    // was stopped, or was briefly out of cycles, and a table that wrote down a
+    // guess would only be preserving it.
     //
-    // An answer we could not decode is still an answer. The bytes prove a
-    // canister ran our dispatcher and replied, which is the whole question
-    // this flag asks; whether we could read them is our problem, not evidence
-    // about them.
+    // What does notice a designer who has genuinely gone is the browser, which
+    // reads their catalog and is told by the owner what to do about it.
     public func noteCallResult(
         mem : Memory.Mem,
         canister : Principal,
         result : NeutronCapabilities.BackendCallResultV1,
         now : Int,
-    ) : Bool {
+    ) : () {
         switch (result) {
-            case (#ok(_)) {
-                noteReachable(mem, canister, now);
-                false;
-            };
-            case (#err(error)) {
-                if (not strikeable(error.code)) return false;
-                noteUnreachable(mem, canister, now);
-            };
+            case (#ok(_)) noteReachable(mem, canister, now);
+            case (#err(_)) {};
         };
-    };
-
-    public func noteUnreachable(mem : Memory.Mem, canister : Principal, now : Int) : Bool {
-        let ?existing = get(mem, canister) else return false;
-        if (existing.retired) return false;
-        let strikes = existing.strikes + 1;
-        let retire = strikes >= RETIRE_STRIKES;
-        Map.add(
-            mem.directory,
-            Principal.compare,
-            canister,
-            { existing with last_seen_ns = now; strikes; retired = retire },
-        );
-        retire;
-    };
-
-    // The owner overruling a conclusion we drew. Clearing it also clears the
-    // evidence, so a designer put back into rotation gets a full three chances
-    // rather than being one bad call from retirement again.
-    public func setRetired(
-        mem : Memory.Mem,
-        canister : Principal,
-        retire : Bool,
-    ) : Bool {
-        let ?existing = get(mem, canister) else return false;
-        Map.add(
-            mem.directory,
-            Principal.compare,
-            canister,
-            { existing with retired = retire; strikes = 0 },
-        );
-        true;
     };
 
     // Ignoring is a flag and nothing more. The catalog it used to drop lives in
@@ -265,8 +212,9 @@ module {
     // that shifts between them makes a paginated read skip entries and repeat
     // others. Principals do not move.
     //
-    // Ignored and retired designers are withheld. Withholding is the whole of
-    // what ignoring means to anyone else.
+    // Ignored designers are withheld, and nobody else is. Withholding is the
+    // whole of what ignoring means to anyone else, and a designer who has not
+    // answered *us* is still somebody the peer asking might reach.
     public func served(
         mem : Memory.Mem,
         self : Principal,
@@ -378,7 +326,6 @@ module {
             if (
                 not chosen(entry) and
                 not entry.ignored and
-                not entry.retired and
                 not Holdings.ownsAnyFrom(mem, canister)
             ) {
                 switch (victim) {

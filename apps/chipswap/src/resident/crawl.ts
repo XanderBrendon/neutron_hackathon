@@ -59,7 +59,7 @@ export type CrawlState = {
 
 export type CrawlSeed = {
   self: string;
-  /** Directory entries a crawl may ask: neither ignored nor retired. */
+  /** Directory entries a crawl may ask: the ones not ignored. */
   eligible: string[];
   /** Every directory entry, so an ignored designer is not rediscovered. */
   known: string[];

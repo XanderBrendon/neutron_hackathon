@@ -28,7 +28,6 @@ import {
 export type MarketDirectoryEntry = {
   canister: string;
   ignored: boolean;
-  retired: boolean;
   contactName: string | null;
 };
 
@@ -147,9 +146,13 @@ export function buildMarketPage(
   offset: number,
   limit: number,
 ): MarketPage {
+  // Ignoring is the only thing that withholds a designer here. One who did not
+  // answer the last fetch keeps the chips they last gave us — an empty market
+  // is a worse answer than a stale one — and the Market names them above the
+  // grid instead, where the owner can withhold them if that is what they want.
   const followed = new Map(
     input.directory
-      .filter((entry) => !entry.ignored && !entry.retired)
+      .filter((entry) => !entry.ignored)
       .map((entry) => [entry.canister, entry]),
   );
 

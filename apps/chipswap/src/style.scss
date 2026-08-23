@@ -497,6 +497,37 @@
     gap: var(--nt-gap-2);
   }
 
+  /* One designer per row: who they are and what happened on the left, the two
+     decisions on the right. The row wraps rather than truncating the reason,
+     because the reason is what the buttons are being chosen between. */
+  .chipswap-unanswered {
+    display: grid;
+    gap: var(--nt-gap-2);
+    margin-bottom: var(--nt-gap-3);
+  }
+
+  .chipswap-unanswered-list {
+    display: grid;
+    gap: var(--nt-gap-2);
+    list-style: none;
+    margin: 0;
+    padding: 0;
+  }
+
+  .chipswap-unanswered-list li {
+    align-items: center;
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--nt-gap-2);
+    justify-content: space-between;
+  }
+
+  .chipswap-unanswered-who {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
   .chipswap-offer {
     display: grid;
     gap: var(--nt-gap-2);

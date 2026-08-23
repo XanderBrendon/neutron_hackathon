@@ -8,7 +8,7 @@ import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v7";
+import Memory "../backend/memory/chipswap/v8";
 import Shape "../backend/Shape";
 
 func principalOf(seed : Nat) : Principal {
@@ -67,10 +67,7 @@ assert (entry.source == #manual);
 assert (entry.first_seen_ns == 100);
 assert (entry.last_seen_ns == 200);
 assert (entry.ignored == false);
-assert (entry.retired == false);
-assert (entry.strikes == 0);
 assert (Directory.ignored(mem, alice) == false);
-assert (Directory.retired(mem, alice) == false);
 // Nothing to set the flag on is a miss, not a silent no-op.
 assert (Directory.setIgnored(mem, principalOf(999), true) == false);
 
@@ -85,8 +82,8 @@ assert (Directory.remove(mem, alice));
 assert (Directory.remove(mem, alice) == false);
 
 // Eviction protects the designers the owner chose, the ones whose chips we
-// hold, and the ones a flag says something about. A crawl arriving with five
-// hundred names must not be able to push out a principal typed in by hand.
+// hold, and the ones they have ignored. A crawl arriving with five hundred
+// names must not be able to push out a principal typed in by hand.
 let evicting = blank();
 assert (Directory.note(evicting, alice, #manual, 10));
 assert (Directory.note(evicting, bob, #trade, 11));
@@ -172,101 +169,70 @@ while (walkIndex < walked.size()) {
     walkIndex += 1;
 };
 
-// We never hand a peer our own address, and neither the ignored nor the retired
-// travel. Withholding is the whole of what those flags mean to anyone else.
+// We never hand a peer our own address, and the ignored do not travel.
+// Withholding is the whole of what that flag means to anyone else, and it is
+// now the only thing that withholds anyone: a designer who has not answered
+// *us* is still somebody the peer asking might reach, and deciding otherwise on
+// their behalf was never ours to do.
 ignore Directory.note(serving, self, #manual, 1);
 ignore Directory.note(serving, alice, #manual, 1);
 ignore Directory.note(serving, bob, #manual, 1);
 assert (Directory.setIgnored(serving, alice, true));
-assert (Directory.setRetired(serving, bob, true));
 let filtered = Directory.served(serving, self, 0, 100);
-assert (filtered.total == 5);
+assert (filtered.total == 6);
+var sawBob = false;
 for (candidate in filtered.entries.values()) {
     assert (candidate != self);
     assert (candidate != alice);
-    assert (candidate != bob);
+    if (candidate == bob) sawBob := true;
 };
+assert (sawBob);
 
-// --- Retirement -------------------------------------------------------------
+// --- What a call's outcome says --------------------------------------------
 
-// A designer earns retirement over three consecutive unanswered calls, and any
-// reply at all resets the count. One bad moment is not an uninstall.
-let strikes = blank();
-ignore Directory.note(strikes, alice, #manual, 1);
-assert (Directory.noteUnreachable(strikes, alice, 2) == false);
-assert (Directory.noteUnreachable(strikes, alice, 3) == false);
-Directory.noteReachable(strikes, alice, 4);
-let ?recovered = Directory.get(strikes, alice) else Runtime.trap("entry missing");
-assert (recovered.strikes == 0);
-assert (recovered.retired == false);
-
-assert (Directory.noteUnreachable(strikes, alice, 5) == false);
-assert (Directory.noteUnreachable(strikes, alice, 6) == false);
-// The third is the one that concludes it, and it says so exactly once.
-assert (Directory.noteUnreachable(strikes, alice, 7));
-assert (Directory.retired(strikes, alice));
-assert (Directory.noteUnreachable(strikes, alice, 8) == false);
-assert (Directory.reachable(strikes, alice) == false);
-
-// --- Reading one call outcome ----------------------------------------------
-
-// The outcome of a paid call is the only evidence we get about a designer, and
-// exactly one code in it is evidence about *them*. Everything else describes
-// something that happened on our side, or is an answer we could not read —
-// and an answer, however garbled, proves someone is home.
+// It says one thing, and only about a designer who answered: that they are
+// there. A peer that replies is a peer we have seen, so the sighting is
+// recorded. A peer that does not is left exactly as it was.
+//
+// Nothing accumulates any more. A strike counter used to live here and retire a
+// designer after three consecutive silences, and it was wrong in both
+// directions — the kernel does not say why a call was rejected, so a canister
+// briefly stopped looked identical to one uninstalled, while a canister long
+// gone stayed unmarked until somebody happened to trade with it. What replaces
+// it is not a better guess: it is a different reader. The browser finds out by
+// asking, and the owner decides.
 let outcomes = blank();
 ignore Directory.note(outcomes, bob, #manual, 1);
 
-// Our own limits are not their fault, so they cost nothing.
-assert (
-    Directory.noteCallResult(
-        outcomes,
-        bob,
-        #err({ code = "concurrency_limit"; message = "" }),
-        2,
-    ) == false
-);
+// Silence changes nothing at all, however much of it there is.
+Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 2);
+Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 3);
+Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 4);
+let ?unmarked = Directory.get(outcomes, bob) else Runtime.trap("entry missing");
+assert (unmarked.last_seen_ns == 1);
+assert (unmarked.ignored == false);
+
+// Three rejections in a row used to close every outward path this designer had.
+// They now close none: bob is still called, still crawled, still served.
+assert (Directory.reachable(outcomes, bob));
+assert (Directory.served(outcomes, self, 0, 10).total == 1);
+
+// An answer is a sighting, whatever it said. Bytes we could not decode still
+// prove a canister ran our dispatcher and replied, which is the whole question.
+Directory.noteCallResult(outcomes, bob, #ok("\00\01\02"), 5);
+let ?seen = Directory.get(outcomes, bob) else Runtime.trap("entry missing");
+assert (seen.last_seen_ns == 5);
+
+// Our own limits were never evidence about them, and now nothing is: a code
+// that describes something that went wrong on this side lands the same way a
+// rejection does, which is to say nowhere.
+Directory.noteCallResult(outcomes, bob, #err({ code = "concurrency_limit"; message = "" }), 6);
 let ?unblamed = Directory.get(outcomes, bob) else Runtime.trap("entry missing");
-assert (unblamed.strikes == 0);
+assert (unblamed.last_seen_ns == 5);
 
-// A rejection is theirs, and three of them retire the designer.
-assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 3) == false);
-assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 4) == false);
-
-// Bytes we cannot decode still came back from a canister that ran, so the
-// count resets rather than climbing to the third strike.
-assert (Directory.noteCallResult(outcomes, bob, #ok("\00\01\02"), 5) == false);
-let ?answered = Directory.get(outcomes, bob) else Runtime.trap("entry missing");
-assert (answered.strikes == 0);
-assert (answered.retired == false);
-
-// And with nothing to reset it, the third rejection concludes it once.
-assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 6) == false);
-assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 7) == false);
-assert (Directory.noteCallResult(outcomes, bob, #err({ code = "call_rejected"; message = "" }), 8));
-assert (Directory.retired(outcomes, bob));
-
-// A retired designer reads as ignored everywhere it matters, but the entry
-// survives: forgetting them would let the next crawl bring them straight back.
-assert (Directory.get(strikes, alice) != null);
-assert (Directory.served(strikes, self, 0, 10).total == 0);
-
-// Retiring closes the same outward paths ignoring does, and for the same
-// reason: we will not spend another call on this designer.
-ignore Directory.note(strikes, bob, #manual, 1);
-assert (Directory.reachable(strikes, bob));
-assert (Directory.setRetired(strikes, bob, true));
-assert (Directory.reachable(strikes, bob) == false);
-assert (Directory.served(strikes, self, 0, 10).total == 0);
-
-// A designer put back into rotation gets a full three chances again rather than
-// sitting one bad call away from retirement.
-assert (Directory.setRetired(strikes, alice, false));
-let ?revived = Directory.get(strikes, alice) else Runtime.trap("entry missing");
-assert (revived.retired == false);
-assert (revived.strikes == 0);
-assert (Directory.setRetired(strikes, principalOf(998), false) == false);
-assert (Directory.noteUnreachable(strikes, principalOf(998), 1) == false);
+// A designer we have never met is not invented by hearing about a call to them.
+Directory.noteCallResult(outcomes, principalOf(998), #ok("\00"), 9);
+assert (Directory.get(outcomes, principalOf(998)) == null);
 
 // --- What a crawl brings back ------------------------------------------------
 //
@@ -333,16 +299,6 @@ assert (squeezed.added + squeezed.skipped == overflow.size());
 assert (squeezed.added == 2);
 assert (squeezed.full);
 assert (Map.size(ceiling.directory) == Directory.MAX_DIRECTORY);
-
-// Only a peer's own silence is evidence against them. Every other code the
-// broker returns describes something that went wrong on this side, and an
-// unreadable reply is not a failure to answer at all.
-assert (Directory.strikeable("call_rejected"));
-assert (Directory.strikeable("concurrency_limit") == false);
-assert (Directory.strikeable("capability_revoked") == false);
-assert (Directory.strikeable("not_reserved") == false);
-assert (Directory.strikeable("reply_limit") == false);
-assert (Directory.strikeable("") == false);
 
 // --- The seeded designer -----------------------------------------------------
 

@@ -9,7 +9,6 @@ import {
   loadSuggestions,
   removeDirectoryEntry,
   setDirectoryIgnored,
-  setDirectoryRetired,
   shortPrincipal,
   type DirectoryEntry,
   type Status,
@@ -462,29 +461,13 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                       {entry.ignored ? (
                         <span className="nt-tag nt-tag--warning">ignored</span>
                       ) : null}
-                      {entry.retired ? (
-                        <span
-                          className="nt-tag nt-tag--warning"
-                          title="This canister stopped answering. Chips you already hold are yours to keep."
-                        >
-                          retired
-                        </span>
-                      ) : null}
-                      {!entry.retired && entry.strikes > 0 ? (
-                        <span
-                          className="nt-tag"
-                          title={`${entry.strikes} call${entry.strikes === 1 ? "" : "s"} in a row went unanswered.`}
-                        >
-                          unanswered ×{entry.strikes}
-                        </span>
-                      ) : null}
                     </td>
                     <td>{designCountOf(catalogs.get(entry.canister))}</td>
                     <td>{lastFetchOf(catalogs.get(entry.canister))}</td>
                     <td className="nt-cluster">
                       <button
                         className="nt-button nt-button--sm"
-                        disabled={busy || entry.ignored || entry.retired}
+                        disabled={busy || entry.ignored}
                         onClick={() =>
                           void run(async () => {
                             const result = await refreshCatalogs(
@@ -500,30 +483,6 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
                         type="button"
                       >
                         Refresh
-                      </button>
-                      <button
-                        className={cx("nt-button nt-button--sm", {
-                          "nt-button--secondary": entry.retired,
-                          "nt-button--ghost": !entry.retired,
-                        })}
-                        disabled={busy}
-                        onClick={() =>
-                          void run(async () => {
-                            await setDirectoryRetired(
-                              entry.canister,
-                              !entry.retired,
-                            );
-                            if (!entry.retired) {
-                              await evictCatalogs([entry.canister]);
-                            }
-                            return entry.retired
-                              ? "Back in the rotation. Refresh to see whether they answer."
-                              : "Marked retired. They will not be called again.";
-                          })
-                        }
-                        type="button"
-                      >
-                        {entry.retired ? "Not retired" : "Retire"}
                       </button>
                       <button
                         className={cx("nt-button nt-button--sm", {

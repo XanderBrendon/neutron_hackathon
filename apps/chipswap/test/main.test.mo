@@ -6,7 +6,7 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Chipswap "../backend/main";
-import Memory "../backend/memory/chipswap/v7";
+import Memory "../backend/memory/chipswap/v8";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
 
@@ -267,8 +267,7 @@ let directory = chipswap.chipswap_directory({ offset = 0; limit = 10 });
 assert (directory.total == 1);
 assert (directory.entries[0].canister == Principal.toText(peer));
 assert (directory.entries[0].source == "trade");
-assert (directory.entries[0].retired == false);
-assert (directory.entries[0].strikes == 0);
+assert (not directory.entries[0].ignored);
 
 // Reading our catalog does not put the reader here. Browsing is not a
 // relationship; proposing a trade is, which is why the peer above is listed and
@@ -470,7 +469,6 @@ assert (freshPage.total == 1);
 assert (freshPage.entries[0].canister == "3wvx3-yaaaa-aaaay-aacuq-cai");
 assert (freshPage.entries[0].source == "seed");
 assert (not freshPage.entries[0].ignored);
-assert (not freshPage.entries[0].retired);
 assert (fresh.chipswap_status(()).directory_count == 1);
 
 // Installed on the seeded canister itself, that address is this canister's own.

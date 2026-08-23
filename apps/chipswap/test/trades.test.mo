@@ -8,7 +8,7 @@ import Text "mo:core/Text";
 import Designs "../backend/Designs";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v7";
+import Memory "../backend/memory/chipswap/v8";
 import Shape "../backend/Shape";
 import Trades "../backend/Trades";
 import Wire "../backend/Wire";
@@ -678,18 +678,16 @@ while (scan < sorted.size()) {
     scan += 1;
 };
 
-// --- A retired designer who turns out to be alive ---------------------------
+// --- An inbound trade is a sighting -----------------------------------------
 
-// Retirement is a conclusion drawn from calls that went unanswered, and a trade
-// proposal disproves it outright: whatever we concluded, they are running
-// Chipswap and they just reached us. The chips we already hold from them are
-// untouched either way — a chip is copied at the trade, not fetched later.
+// A designer who proposes a trade has just proved they are running Chipswap
+// and that they reached us, so the sighting is recorded against their entry.
+// There is nothing for it to disprove any more: this canister used to conclude
+// from three unanswered calls that a designer had uninstalled, and a proposal
+// arriving was the evidence that withdrew it. It no longer draws the
+// conclusion, so a proposal is simply the good news it always was.
 let reviving = designerMemory(true);
 ignore Directory.note(reviving, bob, #manual, 1);
-assert (Directory.noteUnreachable(reviving, bob, 2) == false);
-assert (Directory.noteUnreachable(reviving, bob, 3) == false);
-assert (Directory.noteUnreachable(reviving, bob, 4));
-assert (Directory.retired(reviving, bob));
 
 let revivalRequest = requestId(90);
 switch (
@@ -704,11 +702,9 @@ switch (
     case (#minted(_)) {};
     case (_) Runtime.trap("expected minted");
 };
-assert (Directory.retired(reviving, bob) == false);
 let ?revived = Directory.get(reviving, bob) else Runtime.trap("missing entry");
-assert (revived.strikes == 0);
 assert (revived.last_seen_ns == 400);
-// The designer was chosen by hand, and a revival does not rewrite that.
+// The designer was chosen by hand, and a trade does not rewrite that.
 assert (revived.source == #manual);
 assert (Holdings.count(reviving) == 1);
 

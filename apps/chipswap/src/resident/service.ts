@@ -172,7 +172,7 @@ async function loadDirectory(): Promise<{
     const page = await loadDirectoryPage(offset, DIRECTORY_PAGE);
     for (const entry of page.entries) {
       known.push(entry.canister);
-      if (!entry.ignored && !entry.retired) eligible.push(entry.canister);
+      if (!entry.ignored) eligible.push(entry.canister);
     }
     offset += page.entries.length;
     if (page.entries.length === 0 || offset >= page.total) break;

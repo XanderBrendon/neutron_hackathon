@@ -5,7 +5,7 @@ import Map "mo:core/Map";
 import Nat "mo:core/Nat";
 import Nat8 "mo:core/Nat8";
 import Text "mo:core/Text";
-import Memory "./memory/chipswap/v7";
+import Memory "./memory/chipswap/v8";
 import Requirements "./Requirements";
 import Shape "./Shape";
 

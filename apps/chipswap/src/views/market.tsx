@@ -7,6 +7,8 @@ import {
   loadDirectory,
   formatMsTimestamp,
   proposeTrade,
+  removeDirectoryEntry,
+  setDirectoryIgnored,
   shortPrincipal,
   type Chip,
   type Design,
@@ -14,7 +16,12 @@ import {
   type MarketFilter,
   type Status,
 } from "../api.ts";
-import { loadCachedCatalogs, refreshCatalogs } from "../catalog_client.ts";
+import {
+  evictCatalogs,
+  loadCachedCatalogs,
+  refreshCatalogs,
+} from "../catalog_client.ts";
+import { failedDesigners } from "../catalog_failure.ts";
 import {
   buildMarketPage,
   ownedKey,
@@ -152,6 +159,44 @@ export const Market = ({ status, onChanged }: Props) => {
   const total = page.total;
   const nsfwHidden = page.nsfwHidden;
 
+  // Read off the catalog cache rather than off the fetch that just ran, so it
+  // is the same list whether the refresh was the automatic one on opening or
+  // the button, and it survives a reload. A designer leaves it by answering, by
+  // being ignored, or by being removed — the last two evict the cached catalog
+  // that put them here.
+  const failed = useMemo(
+    () => failedDesigners(catalogs, designers),
+    [catalogs, designers],
+  );
+
+  // What the owner decides about a designer who did not answer. Both endings
+  // take the cached catalog with them: it is what puts the designer on the list
+  // above, and one left behind would keep naming somebody already dealt with.
+  const decide = async (canister: string, action: "ignore" | "remove") => {
+    setBusy(true);
+    setFailure(null);
+    setMessage(null);
+    try {
+      if (action === "ignore") {
+        await setDirectoryIgnored(canister, true);
+      } else {
+        await removeDirectoryEntry(canister);
+      }
+      await evictCatalogs([canister]);
+      await load();
+      setMessage(
+        action === "ignore"
+          ? "Ignored. They will not be asked again until you say otherwise."
+          : "Removed from your directory.",
+      );
+      await onChanged();
+    } catch (error) {
+      setFailure(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   // Only a designer with something cached can put a row here, so those are the
   // only ones the picker offers. A designer whose catalog has not been fetched
   // yet would look like one with nothing to show.
@@ -162,8 +207,7 @@ export const Market = ({ status, onChanged }: Props) => {
         .map((entry) => entry.designer),
     );
     return designers.filter(
-      (entry) =>
-        !entry.ignored && !entry.retired && stocked.has(entry.canister),
+      (entry) => !entry.ignored && stocked.has(entry.canister),
     );
   }, [catalogs, designers]);
 
@@ -173,7 +217,7 @@ export const Market = ({ status, onChanged }: Props) => {
   useEffect(() => {
     if (!loaded) return;
     const eligible = designers
-      .filter((entry) => !entry.ignored && !entry.retired)
+      .filter((entry) => !entry.ignored)
       .map((entry) => entry.canister);
     const stale = staleDesigners(eligible, catalogs, Date.now(), CATALOG_TTL_MS);
     if (stale.length === 0) return;
@@ -225,13 +269,13 @@ export const Market = ({ status, onChanged }: Props) => {
     setMessage(null);
     try {
       const targets = designers
-        .filter((entry) => !entry.ignored && !entry.retired)
+        .filter((entry) => !entry.ignored)
         .map((entry) => entry.canister);
       if (targets.length === 0) {
         setMessage(
           designers.length === 0
             ? "Add a designer in the Directory first."
-            : "Every designer in your directory is ignored or retired.",
+            : "Every designer in your directory is ignored.",
         );
         return;
       }
@@ -239,10 +283,10 @@ export const Market = ({ status, onChanged }: Props) => {
       // recently the last one landed. Batching is the background's business.
       const result = await refreshCatalogs(targets, true);
       setCatalogs(await loadCachedCatalogs());
-      // Silence here is reported and nothing more. A catalog read is a query,
-      // and a designer who did not answer one has not thereby been judged
-      // gone — that conclusion is drawn on the paid routes, and shows up as
-      // the retired badge in the Directory rather than here.
+      // The count is the summary; the callout above the filters names them and
+      // offers the two things worth doing about it. Nothing here concludes
+      // anything — silence is not evidence a designer is gone, and this app no
+      // longer pretends otherwise on the owner's behalf.
       setMessage(
         `Refreshed ${result.fetched.length} designer` +
           `${result.fetched.length === 1 ? "" : "s"}` +
@@ -370,6 +414,59 @@ export const Market = ({ status, onChanged }: Props) => {
           Refresh catalogs
         </button>
       </div>
+
+      {failed.length > 0 ? (
+        <section
+          aria-label="Designers who did not answer"
+          className="nt-callout nt-callout--warning chipswap-unanswered"
+          data-tid="chipswap-unanswered"
+        >
+          <strong>
+            {failed.length} designer{failed.length === 1 ? "" : "s"} did not
+            answer
+          </strong>
+          <p className="nt-help">
+            Silence is not proof anybody is gone: a canister can be stopped, out
+            of cycles, or on a release that cannot answer this yet. Chipswap
+            draws no conclusion from it, so what happens next is yours.
+          </p>
+          <ul className="chipswap-unanswered-list">
+            {failed.map((entry) => (
+              <li key={entry.canister}>
+                <span className="chipswap-unanswered-who">
+                  <strong title={entry.canister}>
+                    {entry.contactName ?? shortPrincipal(entry.canister)}
+                  </strong>
+                  <span className="nt-meta">{entry.reason}</span>
+                  <span className="nt-meta">
+                    {entry.lastFetchedAtMs === 0
+                      ? "Nothing of theirs has ever been read on this machine."
+                      : `Their chips are still here, from ${formatMsTimestamp(entry.lastFetchedAtMs)}.`}
+                  </span>
+                </span>
+                <span className="nt-cluster">
+                  <button
+                    className="nt-button nt-button--sm"
+                    disabled={busy}
+                    onClick={() => void decide(entry.canister, "ignore")}
+                    type="button"
+                  >
+                    Ignore
+                  </button>
+                  <button
+                    className="nt-button nt-button--ghost nt-button--sm"
+                    disabled={busy}
+                    onClick={() => void decide(entry.canister, "remove")}
+                    type="button"
+                  >
+                    Remove
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="nt-disclosure chipswap-filters">
         <button

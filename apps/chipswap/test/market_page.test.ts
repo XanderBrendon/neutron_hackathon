@@ -67,8 +67,8 @@ function input(overrides: Partial<MarketInput> = {}): MarketInput {
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, retired: false, contactName: "Alice" },
-      { canister: BOB, ignored: false, retired: false, contactName: null },
+      { canister: ALICE, ignored: false, contactName: "Alice" },
+      { canister: BOB, ignored: false, contactName: null },
     ],
     ownedKeys: new Set<string>(),
     holdings: [],
@@ -83,19 +83,44 @@ test("every followed designer's designs appear once, newest fetch first", () => 
   expect(page.rows.map((row) => row.title)).toEqual(["Beta", "Alpha"]);
 });
 
-test("an ignored or retired designer contributes nothing", () => {
+// Ignoring is the only thing that withholds a designer from the market. A
+// designer who did not answer the last fetch is not withheld: their chips stay
+// on screen from the last time they did, and the Market names them above the
+// grid so the owner can decide whether to withhold them.
+test("an ignored designer contributes nothing, and nobody else is withheld", () => {
   const page = buildMarketPage(
     input({
       directory: [
-        { canister: ALICE, ignored: true, retired: false, contactName: null },
-        { canister: BOB, ignored: false, retired: true, contactName: null },
+        { canister: ALICE, ignored: true, contactName: null },
+        { canister: BOB, ignored: false, contactName: null },
       ],
     }),
     defaultFilter(),
     0,
     24,
   );
-  expect(page.total).toBe(0);
+  expect(page.total).toBe(1);
+  expect(page.rows[0]!.designer).toBe(BOB);
+});
+
+test("a designer whose last fetch failed keeps the chips they last gave us", () => {
+  const page = buildMarketPage(
+    input({
+      catalogs: [
+        {
+          designer: ALICE,
+          designs: [design(1, "Alpha")],
+          fetchedAtMs: 500,
+          lastError: "not_found",
+        },
+      ],
+      directory: [{ canister: ALICE, ignored: false, contactName: null }],
+    }),
+    defaultFilter(),
+    0,
+    24,
+  );
+  expect(page.rows.map((row) => row.title)).toEqual(["Alpha"]);
 });
 
 test("a cached designer no longer in the directory contributes nothing", () => {
@@ -137,7 +162,7 @@ test("tagged designs are withheld and tallied rather than dropped silently", () 
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, retired: false, contactName: null },
+      { canister: ALICE, ignored: false, contactName: null },
     ],
   });
 
@@ -234,7 +259,7 @@ test("rows from one designer tie-break on design id, not fetch time", () => {
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, retired: false, contactName: null },
+      { canister: ALICE, ignored: false, contactName: null },
     ],
   });
   expect(
@@ -281,7 +306,7 @@ function facetInput(): MarketInput {
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, retired: false, contactName: null },
+      { canister: ALICE, ignored: false, contactName: null },
     ],
   });
 }
@@ -399,7 +424,7 @@ test("total counts the filtered set, so paging stays honest", () => {
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, retired: false, contactName: null },
+      { canister: ALICE, ignored: false, contactName: null },
     ],
   });
   const page = buildMarketPage(many, { ...defaultFilter(), sort: "title" }, 2, 2);

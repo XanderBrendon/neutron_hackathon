@@ -224,28 +224,39 @@ test("status reports the geometry the editor draws with", () => {
   expect(status).not.toHaveProperty("crawl");
 });
 
-test("a directory entry carries the flags the market and the crawl read", () => {
+test("a directory entry carries the one flag the market and the crawl read", () => {
   const entry = parseDirectoryEntry({
     canister: "aaaaa-aa",
     source: "trade",
     first_seen_ns: "1",
     last_seen_ns: "2",
     ignored: true,
-    retired: false,
-    strikes: "2",
     owns_chip: false,
   });
   expect(entry.ignored).toBe(true);
-  // Struck twice but not retired: the tile shows the count so an owner can see
-  // a designer going quiet before the conclusion is drawn.
-  expect(entry.retired).toBe(false);
-  expect(entry.strikes).toBe(2);
   expect(entry.ownsChip).toBe(false);
   // The design count and the last fetch are no longer the canister's to
   // report. They describe what this machine has read, and the Directory view
   // reads them from the browser cache instead.
   expect(entry).not.toHaveProperty("designCount");
   expect(entry).not.toHaveProperty("lastCatalogNs");
+});
+
+// Whether a designer still answers is not a fact the canister keeps. It is
+// true or false right now, the browser learns it every time it reads a
+// catalog, and a copy stored here would be a guess going stale beside the real
+// thing. The Market reads it from the catalog cache instead.
+test("a directory entry says nothing about whether the designer still answers", () => {
+  const entry = parseDirectoryEntry({
+    canister: "aaaaa-aa",
+    source: "trade",
+    first_seen_ns: "1",
+    last_seen_ns: "2",
+    ignored: false,
+    owns_chip: false,
+  });
+  expect(entry).not.toHaveProperty("retired");
+  expect(entry).not.toHaveProperty("strikes");
 });
 
 test("trades parse in both directions", () => {

@@ -10,7 +10,7 @@ import Text "mo:core/Text";
 import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v7";
+import Memory "./memory/chipswap/v8";
 import Requirements "./Requirements";
 import Shape "./Shape";
 import Wire "./Wire";

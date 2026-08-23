@@ -12,12 +12,14 @@ import Migrate4 "../backend/memory/chipswap/v3_to_v4";
 import Migrate5 "../backend/memory/chipswap/v4_to_v5";
 import Migrate6 "../backend/memory/chipswap/v5_to_v6";
 import Migrate7 "../backend/memory/chipswap/v6_to_v7";
+import Migrate8 "../backend/memory/chipswap/v7_to_v8";
 import V1 "../backend/memory/chipswap/v1";
 import V3 "../backend/memory/chipswap/v3";
 import V4 "../backend/memory/chipswap/v4";
 import V5 "../backend/memory/chipswap/v5";
 import V6 "../backend/memory/chipswap/v6";
 import V7 "../backend/memory/chipswap/v7";
+import V8 "../backend/memory/chipswap/v8";
 
 // Migration from the released schemas, with something in every root. Compiling
 // proves the shapes line up; only this proves the values arrive intact and that
@@ -647,3 +649,59 @@ assert (brush7.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
 // And an emptied directory is still empty at the end of the whole chain.
 let emptied7 = Migrate7.migrate(emptied6);
 assert (Map.size(emptied7.directory) == 0);
+
+// --- V7 -> V8 -----------------------------------------------------------
+
+// A directory holding both judgements at once, which is the state the last leg
+// has to tell apart: one designer this canister retired on its own evidence,
+// and one the owner ignored by hand. They looked identical to every reader
+// before now, and V8 keeps exactly one of them.
+Map.add(
+    v7.directory,
+    Principal.compare,
+    exchangedPeer,
+    { crawled7 with retired = true; strikes = 3 },
+);
+
+let v8 : V8.Mem = Migrate8.migrate(v7);
+
+assert (v8.revision == v7.revision);
+assert (v8.next_request_seq == v7.next_request_seq);
+assert (v8.next_brush_id == v7.next_brush_id);
+assert (Map.size(v8.directory) == Map.size(v7.directory));
+
+// The owner's instruction survives a seventh conversion, which is the thing
+// this whole file exists to prove about the directory.
+let ?carried8 = Map.get(v8.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+assert (carried8.source == carried7.source);
+assert (carried8.first_seen_ns == carried7.first_seen_ns);
+assert (carried8.last_seen_ns == carried7.last_seen_ns);
+assert (carried8.ignored);
+
+// The canister's own conclusion does not. A retired designer comes back into
+// rotation as an ordinary entry rather than arriving silenced under a flag the
+// owner never set.
+let ?crawled8 = Map.get(v8.directory, Principal.compare, exchangedPeer) else Runtime.trap("missing entry");
+assert (not crawled8.ignored);
+assert (crawled8.source == #crawl);
+assert (crawled8.first_seen_ns == crawled7.first_seen_ns);
+
+// Nothing that was never the directory's goes with it.
+let ?draft8 = Map.get(v8.designs, Nat.compare, 3) else Runtime.trap("missing design");
+assert (draft8.state == #draft);
+assert (draft8.art.pixels == Blob.fromArray([0, 1, 0]));
+let ?sent8 = Map.get(v8.holdings, Text.compare, "sent") else Runtime.trap("missing chip");
+switch (sent8.state) {
+    case (#escrowed(details)) assert (details.request_id == requestId);
+    case (_) Runtime.trap("escrow was not preserved");
+};
+assert (Map.size(v8.incoming) == Map.size(v7.incoming));
+assert (Map.size(v8.outgoing) == Map.size(v7.outgoing));
+let ?replay8 = Map.get(v8.replay, Text.compare, "replay") else Runtime.trap("missing replay");
+assert (replay8.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
+let ?brush8 = List.get(v8.brushes, 0) else Runtime.trap("missing brush");
+assert (brush8.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+// And an emptied directory is still empty at the end of the whole chain.
+let emptied8 = Migrate8.migrate(emptied7);
+assert (Map.size(emptied8.directory) == 0);

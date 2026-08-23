@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 119,
+    version: 120,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -64,7 +64,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     // field is.
     memory: {
       chipswap: {
-        version: 7,
+        version: 8,
         schemas: {
           1: { src: "memory/chipswap/v1.mo" },
           2: { src: "memory/chipswap/v2.mo" },
@@ -73,6 +73,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
           5: { src: "memory/chipswap/v5.mo" },
           6: { src: "memory/chipswap/v6.mo" },
           7: { src: "memory/chipswap/v7.mo" },
+          8: { src: "memory/chipswap/v8.mo" },
         },
         migrations: [
           { from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" },
@@ -81,6 +82,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
           { from: 4, to: 5, src: "memory/chipswap/v4_to_v5.mo" },
           { from: 5, to: 6, src: "memory/chipswap/v5_to_v6.mo" },
           { from: 6, to: 7, src: "memory/chipswap/v6_to_v7.mo" },
+          { from: 7, to: 8, src: "memory/chipswap/v7_to_v8.mo" },
         ],
       },
     },
@@ -357,8 +359,27 @@ test("the removed catalog methods are gone from every surface", async () => {
 
 test("the manifest and memory versions advanced together", async () => {
   const manifest = await readManifest();
-  expect(manifest.version).toBe(119);
-  expect(manifest.memory?.chipswap?.version).toBe(7);
+  expect(manifest.version).toBe(120);
+  expect(manifest.memory?.chipswap?.version).toBe(8);
+});
+
+// Retirement was a conclusion this canister drew about a designer from three
+// paid calls that went unanswered. It is gone from the schema, so it has to be
+// gone from every surface that could still set it — a preapproved method the
+// tile no longer calls is a method somebody else could.
+test("the retirement route is gone from every surface", async () => {
+  const manifest = await readManifest();
+  const preapproved =
+    manifest.capabilities?.preapproved_self_calls?.methods ?? [];
+  const backend = await readBackend();
+
+  expect(funcMap(manifest)).not.toHaveProperty("chipswap_directory_set_retired");
+  expect(preapproved).not.toContain("chipswap_directory_set_retired");
+  expect(backend).not.toContain("set_retired");
+  // The flag and the evidence behind it leave with it: what a designer is is
+  // the owner's business, and `ignored` is the whole of what they said.
+  expect(backend).not.toContain("retired");
+  expect(backend).not.toContain("strikes");
 });
 
 test("the background ships with a policy that reaches the IC and nothing else", async () => {

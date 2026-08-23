@@ -150,7 +150,7 @@ test("a designer the backend already knows is not counted as found", () => {
 });
 
 test("a designer the owner ignored is not crawled back in", () => {
-  // GAMMA is known to the backend but not eligible: ignored or retired.
+  // GAMMA is known to the backend but not eligible: the owner ignored them.
   const state = start([ALPHA], [ALPHA, GAMMA]);
   notePage(state, ALPHA, 0, { entries: [GAMMA], total: 1 });
   expect(snapshot(state).found).toBe(0);

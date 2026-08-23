@@ -13,7 +13,7 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v7";
+import Memory "./memory/chipswap/v8";
 import PrincipalText "./PrincipalText";
 import Requirements "./Requirements";
 import Shape "./Shape";
@@ -175,8 +175,6 @@ module {
         first_seen_ns : Int;
         last_seen_ns : Int;
         ignored : Bool;
-        retired : Bool;
-        strikes : Nat;
         owns_chip : Bool;
         contact_name : ?Text;
     };
@@ -311,8 +309,6 @@ module {
     public type CanisterRequest = { canister : Text };
 
     public type IgnoreRequest = { canister : Text; ignored : Bool };
-
-    public type RetireRequest = { canister : Text; retired : Bool };
 
     public type SaveBrushRequest = {
         id : ?Nat;
@@ -533,8 +529,6 @@ module {
                             first_seen_ns = entry.first_seen_ns;
                             last_seen_ns = entry.last_seen_ns;
                             ignored = entry.ignored;
-                            retired = entry.retired;
-                            strikes = entry.strikes;
                             owns_chip = Holdings.ownsAnyFrom(mem, entry.canister);
                             contact_name = contactName(entry.canister);
                         };
@@ -787,25 +781,6 @@ module {
                 case (#ok(value)) value;
             };
             if (not Directory.setIgnored(mem, canister, request.ignored)) {
-                return #err(error("not_found"));
-            };
-            bump();
-            #ok({ revision = mem.revision });
-        };
-
-        // Retirement is a conclusion this canister drew from calls that went
-        // unanswered, so the owner is allowed to overrule it in either
-        // direction: to put a designer back into rotation whose canister was
-        // merely stopped, or to retire one they know is gone without waiting for
-        // three more failed calls to say so.
-        public func /*update*/chipswap_directory_set_retired(
-            request : RetireRequest
-        ) : RevisionResult {
-            let canister = switch (parsePrincipal(request.canister)) {
-                case (#err(code)) return #err(error(code));
-                case (#ok(value)) value;
-            };
-            if (not Directory.setRetired(mem, canister, request.retired)) {
                 return #err(error("not_found"));
             };
             bump();
@@ -1277,7 +1252,7 @@ module {
             let result = await* calls.call(
                 routeCall(target, INGRESS_METHOD, route, payload, cycles)
             );
-            ignore Directory.noteCallResult(mem, target, result, Time.now());
+            Directory.noteCallResult(mem, target, result, Time.now());
             switch (result) {
                 case (#err(_)) null;
                 case (#ok(reply)) unwrapReply(reply, maxReplyBytes);
@@ -1759,9 +1734,6 @@ public type chipswap_directory_remove_Output = RevisionResult;
 
 public type chipswap_directory_set_ignored_Input = (request : IgnoreRequest);
 public type chipswap_directory_set_ignored_Output = RevisionResult;
-
-public type chipswap_directory_set_retired_Input = (request : RetireRequest);
-public type chipswap_directory_set_retired_Output = RevisionResult;
 
 public type chipswap_brush_save_Input = (request : SaveBrushRequest);
 public type chipswap_brush_save_Output = RevisionResult;

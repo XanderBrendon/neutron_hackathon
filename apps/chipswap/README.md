@@ -92,7 +92,7 @@ read for free.
 Because the walk is a browser now, a peer still on an older release refuses the
 query outright — they only opened that route to canisters. Those are counted and
 named when the crawl ends, so a thin result says *why* it was thin rather than
-implying an empty network. They are never marked retired for it: not having
+implying an empty network. Nothing is concluded about them for it: not having
 upgraded is not the same as being gone.
 
 Your directory holds 512 designers. A crawl fills the seats that are free and
@@ -109,19 +109,30 @@ dropped, and you stop handing their address to peers who crawl you. Un-ignoring
 restores the entry, not the catalog: nothing of theirs reappears until the next
 refresh actually fetches something.
 
-**Retired designers.** A designer who uninstalls Chipswap leaves a canister that
-no longer answers. The kernel does not tell an app *why* a call was rejected, so
-one silent call proves nothing — a canister can be stopped, frozen, or briefly
-out of cycles. Three unanswered calls in a row, with any reply at all resetting
-the count, mark the designer retired, and a retired one is treated exactly as an
-ignored one. Only the paid update routes count — proposing, resolving, and
-delivering a trade. Those have existed for as long as the protocol has, so a
-rejection on one is about the peer; the query routes are newer, and a designer
-who has yet to upgrade to them must not be retired for it. That is why a
-catalog refresh reports silence without concluding anything from it. A
-trade proposal from a retired designer disproves the conclusion and clears it,
-and the owner can clear or set it by hand. Chips you already hold from them stay
-yours — a chip is copied to you when the trade completes, not fetched later.
+**Designers who stop answering.** A designer who uninstalls Chipswap leaves a
+canister that no longer answers, and nothing tells you which of those has
+happened. The kernel does not say *why* a call was rejected, so silence proves
+nothing on its own: a canister can be stopped, frozen, briefly out of cycles, or
+simply on a release that cannot answer the route you asked.
+
+So Chipswap concludes nothing from it. It used to — three unanswered paid calls
+marked a designer *retired*, and a retired one was treated as an ignored one —
+and the flag was wrong in both directions. It silenced canisters that were down
+for an afternoon, and it stayed clear for canisters long gone that you had not
+happened to trade with. Worse, the reader that actually notices a dead designer
+was forbidden from touching it: a catalog read is a query, and a peer who has
+merely not upgraded refuses a query too.
+
+What happens instead is that the Market shows you. When it refreshes catalogs,
+every designer that came back with nothing is named above the grid, with what
+went wrong beside them and two buttons: **Ignore**, which is the standing
+instruction below, and **Remove**, which drops them from your directory
+entirely. Both take their cached catalog with them. Doing neither is a decision
+too — their chips stay on display from the last time they answered, and the
+notice goes away by itself the moment they answer again.
+
+Chips you already hold from them stay yours either way: a chip is copied to you
+when the trade completes, not fetched later.
 
 **Market.** Catalogs are read by the browser, from the designers that publish
 them, and kept on the machine that asked. The canister stores none of them: a
@@ -134,10 +145,12 @@ than a day old, filling rows in behind you as they answer. Filtering, sorting
 and paging all happen in the browser over that copy.
 
 A designer who does not answer keeps the catalog they last gave you rather than
-emptying out, and the Directory says they did not answer. That matters during a
-rollout: the `catalog` route only became readable by a browser in version 116,
-so a designer still on an older release cannot be read from here until they
-upgrade, and saying so beats their chips quietly vanishing.
+emptying out, and is named above the grid with what went wrong and the choice of
+ignoring or removing them. That naming matters during a rollout: the `catalog`
+route only became readable by a browser in version 116, so a designer still on
+an older release cannot be read from here until they upgrade — and being told
+*that*, rather than that they did not answer, is the difference between waiting
+for them and dropping them.
 
 Two choices sit above the filters because they are standing ones: *Show NSFW*,
 which is off until you turn it on, and *Refresh catalogs*. Everything else is
@@ -246,6 +259,7 @@ src/
   editor_state.ts   pure editor reducers with undo and locks
   requirements.ts   what a design asks of an offered chip
   market_filter.ts  the market's filter axes and how they are named
+  catalog_failure.ts which designers did not answer, and what to say about it
   market_page.ts    the market page, joined and filtered in the tile
   wire.ts           the CSW1 catalog and directory readers, mirroring Wire.mo
   catalog_client.ts the tile's side of the background's catalog tools

@@ -104,8 +104,6 @@ export type DirectoryEntry = {
   firstSeenNs: string;
   lastSeenNs: string;
   ignored: boolean;
-  retired: boolean;
-  strikes: number;
   ownsChip: boolean;
   contactName: string | null;
 };
@@ -370,8 +368,6 @@ export function parseDirectoryEntry(value: unknown): DirectoryEntry {
     firstSeenNs: nsText(source.first_seen_ns, "first seen"),
     lastSeenNs: nsText(source.last_seen_ns, "last seen"),
     ignored: bool(source.ignored, "ignored flag"),
-    retired: bool(source.retired, "retired flag"),
-    strikes: natNumber(source.strikes, "strike count"),
     ownsChip: bool(source.owns_chip, "ownership flag"),
     contactName: optionalText(source.contact_name, "contact name"),
   };
@@ -664,20 +660,6 @@ export async function setDirectoryIgnored(
   return parseRevision(
     await updateSelf("chipswap_directory_set_ignored", [
       { canister, ignored },
-    ] as unknown as JsonValue[]),
-  );
-}
-
-// Retirement is a conclusion the canister drew from calls that went unanswered.
-// The owner may set it or clear it: clear it for a designer whose canister was
-// only stopped, set it for one they know is gone.
-export async function setDirectoryRetired(
-  canister: string,
-  retired: boolean,
-): Promise<number> {
-  return parseRevision(
-    await updateSelf("chipswap_directory_set_retired", [
-      { canister, retired },
     ] as unknown as JsonValue[]),
   );
 }
