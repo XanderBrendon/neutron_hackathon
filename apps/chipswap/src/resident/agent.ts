@@ -17,7 +17,12 @@
 import { Actor, HttpAgent } from "@dfinity/agent";
 import { IDL } from "@dfinity/candid";
 import { icHost } from "neutron-tools/src/runtime.js";
-import { decodeCatalogReply, type PeerDesign } from "../wire.ts";
+import { unwrapBlobReturn } from "../ingress_wire.ts";
+import {
+  decodeCatalogReply,
+  MAX_MESSAGE_BYTES,
+  type PeerDesign,
+} from "../wire.ts";
 
 const PHYSICAL_METHOD = "app_chipswap__chipswap_v1_query";
 const ROUTE_ID = "catalog";
@@ -106,7 +111,12 @@ export async function fetchCatalog(designer: string): Promise<CatalogFetch> {
     }
     if (reply.ok === undefined) return { error: "malformed_reply" };
 
-    const designs = decodeCatalogReply(Uint8Array.from(reply.ok));
+    // Two Candid layers wrap the message. The actor took the outer one off;
+    // the handler's Blob return is still encoded underneath it.
+    const inner = unwrapBlobReturn(Uint8Array.from(reply.ok), MAX_MESSAGE_BYTES);
+    if (inner === null) return { error: "malformed_envelope" };
+
+    const designs = decodeCatalogReply(inner);
     // A message we cannot read is refused whole rather than partly kept.
     if (designs === null) return { error: "undecodable" };
     return { designs };

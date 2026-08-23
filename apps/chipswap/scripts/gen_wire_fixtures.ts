@@ -60,6 +60,8 @@ try {
   const parsed = JSON.parse(json) as {
     valid: Record<string, string>;
     invalid: Record<string, string>;
+    envelope: Record<string, string>;
+    envelope_invalid: Record<string, string>;
   };
   for (const [section, entries] of Object.entries(parsed)) {
     for (const [name, hex] of Object.entries(entries)) {
@@ -79,8 +81,9 @@ try {
     `${motoko}\n`,
   );
   console.log(
-    `wrote ${Object.keys(parsed.valid).length} valid and ` +
-      `${Object.keys(parsed.invalid).length} invalid fixtures`,
+    Object.entries(parsed)
+      .map(([section, entries]) => `${Object.keys(entries).length} ${section}`)
+      .join(", ") + " fixtures written",
   );
 } finally {
   await disposeMotokoCompiler();

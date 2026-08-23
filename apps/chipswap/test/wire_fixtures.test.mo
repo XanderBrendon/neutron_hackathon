@@ -1,5 +1,6 @@
 import Blob "mo:core/Blob";
 import Runtime "mo:core/Runtime";
+import IngressWire "../backend/IngressWire";
 import Wire "../backend/Wire";
 import Fixtures "./fixtures/catalog_wire";
 
@@ -76,3 +77,35 @@ if (three.designs[0].design_id != 1 or three.designs[1].design_id != 9 or three.
 let ?tenBytes = Fixtures.unhex(lookup(Fixtures.valid, "full_ten")) else Runtime.trap("full_ten missing");
 let ?ten = Wire.decodeCatalogReply(Blob.fromArray(tenBytes)) else Runtime.trap("full_ten refused");
 if (ten.designs.size() != 10) Runtime.trap("full_ten is not ten designs");
+
+// The frame the message travels inside. The client had a decoder for the
+// message and none for the frame, so every good reply was refused; asserting
+// both layers here is what keeps the two suites checking the same thing.
+for ((name, hex) in Fixtures.envelope.values()) {
+    let ?bytes = Fixtures.unhex(hex) else Runtime.trap("fixture is not hex: " # name);
+    let frame = Blob.fromArray(bytes);
+    let ?payload = IngressWire.unwrapBlobReturn(frame, Wire.MAX_MESSAGE_BYTES) else {
+        Runtime.trap("valid envelope refused: " # name);
+    };
+    switch (Wire.decodeCatalogReply(payload)) {
+        case (?_) {};
+        case null Runtime.trap("envelope carried an unreadable catalog: " # name);
+    };
+};
+
+for ((name, hex) in Fixtures.envelope_invalid.values()) {
+    let ?bytes = Fixtures.unhex(hex) else Runtime.trap("fixture is not hex: " # name);
+    switch (IngressWire.unwrapBlobReturn(Blob.fromArray(bytes), Wire.MAX_MESSAGE_BYTES)) {
+        case (?_) Runtime.trap("invalid envelope accepted: " # name);
+        case null {};
+    };
+};
+
+// The frame around open_single must yield exactly open_single, or the two
+// suites are asserting different bytes while reading one fixture file.
+let ?frameHex = Fixtures.unhex(lookup(Fixtures.envelope, "one_design")) else Runtime.trap("one_design missing");
+let ?singleHex = Fixtures.unhex(lookup(Fixtures.valid, "open_single")) else Runtime.trap("open_single missing");
+let ?unwrapped = IngressWire.unwrapBlobReturn(Blob.fromArray(frameHex), Wire.MAX_MESSAGE_BYTES) else {
+    Runtime.trap("one_design refused");
+};
+if (unwrapped != Blob.fromArray(singleHex)) Runtime.trap("the frame did not carry open_single");

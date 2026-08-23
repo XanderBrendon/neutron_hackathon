@@ -85,6 +85,10 @@ module {
         frame(BLOB_RETURN_PREFIX, payload, false);
     };
 
+    public func testNonCanonicalBlobReturnFrame(payload : Blob) : Blob {
+        frame(BLOB_RETURN_PREFIX, payload, true);
+    };
+
     func frame(prefix : [Nat8], payload : Blob, nonCanonical : Bool) : Blob {
         let bytes = List.empty<Nat8>();
         for (byte in prefix.values()) List.add(bytes, byte);

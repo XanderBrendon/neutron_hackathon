@@ -3,6 +3,7 @@ import Blob "mo:core/Blob";
 import Debug "mo:core/Debug";
 import Nat8 "mo:core/Nat8";
 import Nat32 "mo:core/Nat32";
+import IngressWire "../backend/IngressWire";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
 
@@ -210,6 +211,47 @@ let invalid : [(Text, Blob)] = [
     ("nsfw_required_without_rule", mutate(oneDesign, FLAGS_AT, 16)),
 ];
 
+// --- The Candid frame a Blob-returning handler's reply arrives inside -----
+//
+// A peer's catalog does not come back bare. The kernel's dispatcher answers
+// PublicIngressResultV1, and the #ok blob inside it is itself the Candid
+// encoding of the handler's Blob return. A client that reads only the outer
+// layer hands `DIDL...` to the catalog decoder and refuses every answer it is
+// given, which is what shipped. These fixtures exist so both decoders are
+// checked against that second layer and not only the message inside it.
+
+let threeMessage = Wire.encodeCatalogReply({
+    designs = [openDesign, strictDesign, requiredTag];
+});
+let envelopeOne = IngressWire.testBlobReturnFrame(oneDesign);
+
+let envelope : [(Text, Blob)] = [
+    ("empty_payload", IngressWire.testBlobReturnFrame(Wire.encodeCatalogReply({ designs = [] }))),
+    ("one_design", envelopeOne),
+    // `empty_payload` needs a single length byte and these need two, so the
+    // LEB128 reader is exercised on both sides of its continuation bit.
+    ("three", IngressWire.testBlobReturnFrame(threeMessage)),
+];
+
+let envelope_invalid : [(Text, Blob)] = [
+    // The message with no frame at all. Accepting this would mean the two
+    // layers had been collapsed into one somewhere.
+    ("bare_message", oneDesign),
+    // `variant` where the type table must say `vec nat8`.
+    ("wrong_type_table", mutate(envelopeOne, 5, 107)),
+    // Not Candid at all.
+    ("bad_magic", mutate(envelopeOne, 0, 0x45)),
+    // A complete frame with one byte after it.
+    ("trailing_byte", append(envelopeOne, [0])),
+    // A length that runs past the bytes provided.
+    ("truncated_payload", truncate(envelopeOne, envelopeOne.size() - 1)),
+    // The same length written the long way. Two byte strings must never mean
+    // one reply.
+    ("non_canonical_length", IngressWire.testNonCanonicalBlobReturnFrame(oneDesign)),
+    // Prefix and nothing else.
+    ("prefix_only", truncate(envelopeOne, 9)),
+];
+
 func jsonSection(section : Text, entries : [(Text, Blob)]) {
     Debug.print("  \"" # section # "\": {");
     var index = 0;
@@ -225,6 +267,10 @@ Debug.print("{");
 jsonSection("valid", valid);
 Debug.print("  },");
 jsonSection("invalid", invalid);
+Debug.print("  },");
+jsonSection("envelope", envelope);
+Debug.print("  },");
+jsonSection("envelope_invalid", envelope_invalid);
 Debug.print("  }");
 Debug.print("}");
 
@@ -256,6 +302,10 @@ Debug.print("module {");
 motokoSection("valid", valid);
 Debug.print("");
 motokoSection("invalid", invalid);
+Debug.print("");
+motokoSection("envelope", envelope);
+Debug.print("");
+motokoSection("envelope_invalid", envelope_invalid);
 Debug.print("");
 Debug.print("    func digit(character : Char) : ?Nat8 {");
 Debug.print("        let point = Char.toNat32(character);");
