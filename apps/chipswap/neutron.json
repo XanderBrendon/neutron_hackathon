@@ -2,10 +2,14 @@
   "format": 3,
   "name": "Chipswap",
   "id": "chipswap",
-  "version": 115,
+  "version": 116,
   "update_source": "233tv-xiaaa-aaaay-aacta-cai",
   "description": "Design, publish, and trade pixel chips between Neutron canisters",
   "src": "main.mo",
+  "background": {
+    "path": "service.html",
+    "description": "Fetch and cache peer catalogs for the market"
+  },
   "backend": {
     "capabilities": {
       "backend_calls": {
@@ -33,6 +37,10 @@
     }
   },
   "capabilities": {
+    "persistent_browser_storage": {
+      "api": 1,
+      "surface": "background"
+    },
     "public_ingress": {
       "api": 1,
       "routes": [
@@ -41,7 +49,7 @@
           "id": "catalog",
           "handler": "chipswap_catalog_v1",
           "mode": "query",
-          "caller": "canister",
+          "caller": "any",
           "max_request_bytes": 1024,
           "max_response_bytes": 65536
         },

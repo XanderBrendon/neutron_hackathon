@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 114,
+    version: 116,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -64,19 +64,21 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     // field is.
     memory: {
       chipswap: {
-        version: 5,
+        version: 6,
         schemas: {
           1: { src: "memory/chipswap/v1.mo" },
           2: { src: "memory/chipswap/v2.mo" },
           3: { src: "memory/chipswap/v3.mo" },
           4: { src: "memory/chipswap/v4.mo" },
           5: { src: "memory/chipswap/v5.mo" },
+          6: { src: "memory/chipswap/v6.mo" },
         },
         migrations: [
           { from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" },
           { from: 2, to: 3, src: "memory/chipswap/v2_to_v3.mo" },
           { from: 3, to: 4, src: "memory/chipswap/v3_to_v4.mo" },
           { from: 4, to: 5, src: "memory/chipswap/v4_to_v5.mo" },
+          { from: 5, to: 6, src: "memory/chipswap/v5_to_v6.mo" },
         ],
       },
     },
@@ -92,13 +94,15 @@ test("chipswap declares three paid routes and two free ones", async () => {
     routes: [
       // Reading a catalog is a query for the same reason crawling is: it
       // writes nothing and records nothing about who asked, so it charges
-      // nothing either.
+      // nothing either. It admits any caller because the browser reads it
+      // directly now, and a tile is credentialless — its query is anonymous or
+      // it does not happen.
       {
         protocol: "chipswap_v1",
         id: "catalog",
         handler: "chipswap_catalog_v1",
         mode: "query",
-        caller: "canister",
+        caller: "any",
         max_request_bytes: 1024,
         max_response_bytes: 65536,
       },
@@ -288,4 +292,64 @@ test("the tile bundle loads nothing from an external host", async () => {
   // "^https://[^/?#@]+/" are not hostnames and stay allowed.
   expect(js).not.toMatch(/https:\/\/[a-z0-9][a-z0-9.-]*\.[a-z]{2,}/i);
   expect(js).toContain("#react-error-");
+});
+
+test("the catalog route admits a browser and the paid routes stay paid", async () => {
+  const manifest = await readManifest();
+  const all = routes(manifest);
+
+  // A tile is credentialless and never holds the owner's identity, so a
+  // browser-originated query arrives anonymous. "authenticated" would refuse
+  // it and "canister" refuses it today.
+  const catalog = all.find((route) => route.id === "catalog");
+  expect(catalog).toMatchObject({ mode: "query", caller: "any" });
+  expect(catalog).not.toHaveProperty("required_cycles");
+
+  // Widening one query route is not a licence to widen the rest. The directory
+  // route still serves canisters, and the three update routes still cost a
+  // caller cycles.
+  const directory = all.find((route) => route.id === "directory");
+  expect(directory).toMatchObject({ mode: "query", caller: "canister" });
+
+  for (const id of ["trade", "deliver", "status"]) {
+    const route = all.find((entry) => entry.id === id);
+    expect(route).toMatchObject({ mode: "update", caller: "canister" });
+    expect(route?.required_cycles).toBeGreaterThan(0);
+  }
+});
+
+test("the background is declared with persistent browser storage", async () => {
+  const manifest = await readManifest();
+
+  // Tiles get no persistence, so a cache that survives a reload has to live in
+  // a background with a persistent origin.
+  expect(manifest.background).toMatchObject({ path: "service.html" });
+  expect(manifest.capabilities?.persistent_browser_storage).toMatchObject({
+    api: 1,
+    surface: "background",
+  });
+  // The two resident capabilities are mutually exclusive.
+  expect(manifest.capabilities).not.toHaveProperty("dedicated_resident_origin");
+});
+
+test("the removed catalog methods are gone from every surface", async () => {
+  const manifest = await readManifest();
+  const map = funcMap(manifest);
+  const preapproved =
+    manifest.capabilities?.preapproved_self_calls?.methods ?? [];
+  const backend = await readBackend();
+
+  for (const method of ["chipswap_store", "chipswap_fetch_catalogs"]) {
+    expect(map).not.toHaveProperty(method);
+    expect(preapproved).not.toContain(method);
+    expect(backend).not.toContain(method);
+  }
+  // The cache they fed goes with them.
+  expect(backend).not.toContain("catalog_cache");
+});
+
+test("the manifest and memory versions advanced together", async () => {
+  const manifest = await readManifest();
+  expect(manifest.version).toBe(116);
+  expect(manifest.memory?.chipswap?.version).toBe(6);
 });
