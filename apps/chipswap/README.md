@@ -85,10 +85,10 @@ looking.
 **Ignoring a designer.** Ignoring is not forgetting. A forgotten designer comes
 straight back the next time a crawl finds them, with no memory of having been
 turned away; an ignored one stays in your list saying so. While a designer is
-ignored their catalog is never fetched, their cached designs leave the Market,
-and you stop handing their address to peers who crawl you. Un-ignoring restores
-the entry, not the catalog: nothing of theirs reappears until the next refresh
-actually fetches something.
+ignored their catalog is never fetched, the copy this machine already had is
+dropped, and you stop handing their address to peers who crawl you. Un-ignoring
+restores the entry, not the catalog: nothing of theirs reappears until the next
+refresh actually fetches something.
 
 **Retired designers.** A designer who uninstalls Chipswap leaves a canister that
 no longer answers. The kernel does not tell an app *why* a call was rejected, so
@@ -104,8 +104,21 @@ trade proposal from a retired designer disproves the conclusion and clears it,
 and the owner can clear or set it by hand. Chips you already hold from them stay
 yours — a chip is copied to you when the trade completes, not fetched later.
 
-**Market.** The Market reads a bounded cache of the catalogs you have fetched,
-so it opens instantly and refreshes explicitly.
+**Market.** Catalogs are read by the browser, from the designers that publish
+them, and kept on the machine that asked. The canister stores none of them: a
+peer's published work is theirs, it is public, and holding a copy of it in your
+own canister costs you storage for data that goes stale silently.
+
+The Market therefore opens on whatever this machine last fetched — instantly,
+with no network in the way — and then re-asks any designer whose copy is more
+than a day old, filling rows in behind you as they answer. Filtering, sorting
+and paging all happen in the browser over that copy.
+
+A designer who does not answer keeps the catalog they last gave you rather than
+emptying out, and the Directory says they did not answer. That matters during a
+rollout: the `catalog` route only became readable by a browser in version 116,
+so a designer still on an older release cannot be read from here until they
+upgrade, and saying so beats their chips quietly vanishing.
 
 Two choices sit above the filters because they are standing ones: *Show NSFW*,
 which is off until you turn it on, and *Refresh catalogs*. Everything else is
@@ -196,7 +209,7 @@ backend/
   Shape.mo          chip geometry and art validation
   Designs.mo        the ten slots: draft, save, publish, mint
   Holdings.mo       chips held, escrowed, or uncertain
-  Directory.mo      designers, the crawl, catalog cache, market filtering
+  Directory.mo      designers and the crawl
   Requirements.mo   measuring an offer against a design's requirements
   Trades.mo         the trade state machine
   Wire.mo           the CSW1 peer reply format
@@ -214,9 +227,24 @@ src/
   editor_state.ts   pure editor reducers with undo and locks
   requirements.ts   what a design asks of an offered chip
   market_filter.ts  the market's filter axes and how they are named
+  market_page.ts    the market page, joined and filtered in the tile
+  wire.ts           the CSW1 catalog reader, mirroring Wire.mo
+  catalog_client.ts the tile's side of the background's three tools
   api.ts            typed self calls and payload parsers
+  resident/
+    service.ts      the background: exposes the three catalog tools
+    agent.ts        one anonymous query to a peer's catalog route
+    store.ts        the IndexedDB catalog cache
+    freshness.ts    which designers are worth asking again
   views/            studio, collection, market, trades, directory
 ```
+
+The `catalog` route admits any caller, because a tile is credentialless and
+never holds the owner's identity — a browser-originated query is anonymous or
+it does not happen. Replies are signature-verified against the IC root key, but
+they are not certified state, so nothing read this way is trusted enough to
+spend a chip on: `chipswap_trade_propose` re-asks the peer through the backend
+before it mints or escrows anything.
 
 ## Not implemented
 
