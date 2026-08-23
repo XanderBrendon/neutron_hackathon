@@ -302,7 +302,7 @@
   },
   "memory": {
     "chipswap": {
-      "version": 5,
+      "version": 6,
       "schemas": {
         "1": {
           "src": "memory/chipswap/v1.mo"
@@ -318,6 +318,9 @@
         },
         "5": {
           "src": "memory/chipswap/v5.mo"
+        },
+        "6": {
+          "src": "memory/chipswap/v6.mo"
         }
       },
       "migrations": [
@@ -340,6 +343,11 @@
           "from": 4,
           "to": 5,
           "src": "memory/chipswap/v4_to_v5.mo"
+        },
+        {
+          "from": 5,
+          "to": 6,
+          "src": "memory/chipswap/v5_to_v6.mo"
         }
       ]
     }

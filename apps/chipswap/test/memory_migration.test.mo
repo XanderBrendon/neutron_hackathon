@@ -9,10 +9,12 @@ import Migrate "../backend/memory/chipswap/v1_to_v2";
 import Migrate3 "../backend/memory/chipswap/v2_to_v3";
 import Migrate4 "../backend/memory/chipswap/v3_to_v4";
 import Migrate5 "../backend/memory/chipswap/v4_to_v5";
+import Migrate6 "../backend/memory/chipswap/v5_to_v6";
 import V1 "../backend/memory/chipswap/v1";
 import V3 "../backend/memory/chipswap/v3";
 import V4 "../backend/memory/chipswap/v4";
 import V5 "../backend/memory/chipswap/v5";
+import V6 "../backend/memory/chipswap/v6";
 
 // Migration from the released schemas, with something in every root. Compiling
 // proves the shapes line up; only this proves the values arrive intact and that
@@ -532,6 +534,56 @@ assert (Map.size(emptied.directory) == 0);
 // A crawl does not survive an upgrade, the same way it did not survive the last
 // one: the peers it was midway through asking are a live call graph, not state.
 switch (emptied.crawl) {
+    case null {};
+    case (?_) Runtime.trap("a migration started a crawl");
+};
+
+// --- V5 -> V6 -----------------------------------------------------------
+
+// The whole chain lands somewhere still readable. A directory that entered at
+// V1 is the same directory at V6, minus only the two fields V6 drops on
+// purpose, and everything that was never the cache's carries through a fifth
+// conversion untouched.
+let v6 : V6.Mem = Migrate6.migrate(latest);
+
+assert (v6.revision == latest.revision);
+assert (v6.next_request_seq == latest.next_request_seq);
+assert (v6.next_brush_id == latest.next_brush_id);
+assert (Map.size(v6.directory) == Map.size(latest.directory));
+
+let ?carried6 = Map.get(v6.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+assert (carried6.source == carried.source);
+assert (carried6.first_seen_ns == 5);
+assert (carried6.last_seen_ns == 6);
+assert (carried6.ignored == carried.ignored);
+assert (carried6.retired == carried.retired);
+assert (carried6.strikes == carried.strikes);
+let ?crawled6 = Map.get(v6.directory, Principal.compare, exchangedPeer) else Runtime.trap("missing entry");
+assert (crawled6.source == #crawl);
+
+let ?draft6 = Map.get(v6.designs, Nat.compare, 3) else Runtime.trap("missing design");
+assert (draft6.state == #draft);
+assert (draft6.title == "Design 3");
+assert (draft6.requirements.approval);
+assert (draft6.art.pixels == Blob.fromArray([0, 1, 0]));
+let ?sent6 = Map.get(v6.holdings, Text.compare, "sent") else Runtime.trap("missing chip");
+switch (sent6.state) {
+    case (#escrowed(details)) assert (details.request_id == requestId);
+    case (_) Runtime.trap("escrow was not preserved");
+};
+assert (Map.size(v6.incoming) == Map.size(latest.incoming));
+assert (Map.size(v6.outgoing) == Map.size(latest.outgoing));
+let ?replay6 = Map.get(v6.replay, Text.compare, "replay") else Runtime.trap("missing replay");
+assert (replay6.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
+let ?brush6 = List.get(v6.brushes, 0) else Runtime.trap("missing brush");
+assert (brush6.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+// An emptied directory stays empty here too: dropping the cache is not a
+// reason to hand the owner an address they removed.
+let emptied6 = Migrate6.migrate(Migrate5.migrate(V4.init()));
+assert (Map.size(emptied6.directory) == 0);
+
+switch (emptied6.crawl) {
     case null {};
     case (?_) Runtime.trap("a migration started a crawl");
 };
