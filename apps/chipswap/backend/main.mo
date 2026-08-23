@@ -1006,6 +1006,27 @@ module {
                 case (_) return #err(error("invalid_request"));
             };
 
+            // The design must be one the peer really publishes. The check that
+            // used to read a stored catalog reads the peer instead: the catalog
+            // is the browser's now, and a browser's copy can be a day old.
+            // Asking costs nothing — it is a query route — and it happens
+            // before anything is minted or escrowed, so a design that has been
+            // withdrawn since the tile last looked ends the proposal here
+            // rather than one paid call and one wasted mint later.
+            let catalogReply = await* queryRoute(
+                peer,
+                ROUTE_CATALOG,
+                to_candid ({} : PeerCatalogRequest),
+                Wire.MAX_MESSAGE_BYTES,
+            );
+            let catalog = switch (catalogReply) {
+                case null null;
+                case (?bytes) Wire.decodeCatalogReply(bytes);
+            };
+            if (not publishesDesign(catalog, request.want_design_id)) {
+                return #err(error("unknown_design"));
+            };
+
             let now = Time.now();
             let proposal = switch (
                 Trades.beginPropose(
@@ -1303,6 +1324,28 @@ module {
             };
         };
 
+        // One free call to a peer's query dispatcher.
+        //
+        // Unlike callRoute this records nothing about the outcome. The route is
+        // a query, and a peer on a release older than 108 exposes no query
+        // dispatcher at all — striking them for that would be striking them for
+        // not having upgraded. Reachability is decided on the paid routes,
+        // where a rejection means what it says.
+        func queryRoute(
+            target : Principal,
+            route : Text,
+            payload : Blob,
+            maxReplyBytes : Nat,
+        ) : async* ?Blob {
+            let result = await* calls.call(
+                routeCall(target, INGRESS_QUERY_METHOD, route, payload, QUERY_ROUTE_CYCLES)
+            );
+            switch (result) {
+                case (#err(_)) null;
+                case (#ok(reply)) unwrapReply(reply, maxReplyBytes);
+            };
+        };
+
         func crawlView() : CrawlView {
             let progress = Directory.crawlProgress(mem);
             {
@@ -1465,6 +1508,22 @@ module {
     };
 
     // --- Pure helpers ---------------------------------------------------------
+
+    // Whether a peer's catalog really carries the design a proposal names.
+    //
+    // `null` is every way the question can fail to get an answer: the peer was
+    // unreachable, rejected the route, or sent bytes we refused to decode.
+    // All of them answer no. Silence is not permission — a peer that will not
+    // answer a free query would not have answered the paid trade call either,
+    // and saying no here costs the owner nothing, where saying yes would mint
+    // a chip against a design that may not exist.
+    public func publishesDesign(catalog : ?Wire.CatalogReply, designId : Nat) : Bool {
+        let ?reply = catalog else return false;
+        for (design in reply.designs.values()) {
+            if (design.design_id == designId) return true;
+        };
+        false;
+    };
 
     func activeOutgoing(state : Memory.OutgoingState) : Bool {
         switch (state) {
@@ -1676,7 +1735,11 @@ module {
             case ("not_published") "Only a published design can be minted.";
             case ("self_trade") "A Neutron cannot trade with itself.";
             case ("self_entry") "That is this Neutron's own address.";
-            case ("unknown_design") "That design is not in the designer's catalog.";
+            // One code, two causes, because the caller cannot tell them apart
+            // and neither can we: a designer who withdrew the design and one
+            // whose canister is not answering both leave us without a design to
+            // trade for.
+            case ("unknown_design") "The designer did not confirm that design. They may have withdrawn it, or their canister may not be answering.";
             case ("unknown_trade") "That trade is not known here.";
             case ("holdings_full") "This collection is full.";
             case ("outgoing_full") "Too many trades are already in flight.";

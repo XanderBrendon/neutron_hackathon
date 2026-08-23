@@ -487,3 +487,50 @@ assert (own.chipswap_status(()).directory_count == 0);
 // memory leaves nothing behind to clean up.
 let again = Chipswap.Init(environmentFor(ownMemory, Memory.seedDesigner()));
 assert (again.chipswap_directory({ offset = 0; limit = 10 }).total == 0);
+
+// --- The propose-time catalog check -----------------------------------------
+
+// There is no stored catalog to consult any more, so chipswap_trade_propose
+// asks the peer before it mints. The decision that check makes is this
+// function, and every way it can say no is a chip not spent.
+let checkArt : Wire.Art = {
+    shape_id = Shape.SHAPE_ID;
+    palette = [0x000000];
+    pixels = Blob.fromArray(Array.tabulate<Nat8>(Shape.PIXEL_COUNT, func(_) { 0 }));
+};
+
+func publishedByPeer(id : Nat) : Wire.Design {
+    {
+        design_id = id;
+        title = "Peer chip";
+        art = checkArt;
+        requirements = {
+            approval = false;
+            min_colors = null;
+            max_coverage = null;
+            nsfw = null;
+        };
+        nsfw = false;
+        design_revision = 1;
+        published_at_ns = 5;
+    };
+};
+
+let peerCatalog : Wire.CatalogReply = { designs = [publishedByPeer(1), publishedByPeer(4)] };
+
+// A design the peer really publishes is the only case that proceeds.
+assert (Chipswap.publishesDesign(?peerCatalog, 1));
+assert (Chipswap.publishesDesign(?peerCatalog, 4));
+
+// One they do not publish does not, however plausible the id looks. This is
+// the stale-browser-cache case: the tile offered a row that is no longer real.
+assert (Chipswap.publishesDesign(?peerCatalog, 2) == false);
+assert (Chipswap.publishesDesign(?peerCatalog, 0) == false);
+
+// A designer who has published nothing yet.
+assert (Chipswap.publishesDesign(?{ designs = [] }, 1) == false);
+
+// No answer at all — unreachable, rejected, or a reply we could not decode.
+// Silence is not permission: a peer that will not answer a free query would
+// not have answered the paid call either, and refusing here costs no chip.
+assert (Chipswap.publishesDesign(null, 1) == false);
