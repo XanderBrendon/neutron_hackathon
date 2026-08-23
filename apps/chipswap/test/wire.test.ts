@@ -1,5 +1,5 @@
 import { expect, test } from "bun:test";
-import { decodeCatalogReply } from "../src/wire.ts";
+import { decodeCatalogReply, decodeDirectoryReply } from "../src/wire.ts";
 import { PIXEL_COUNT, SHAPE_ID } from "../src/chip.ts";
 import fixtures from "./fixtures/catalog_wire.json" with { type: "json" };
 
@@ -80,4 +80,55 @@ test("a message past the size ceiling is refused before it is read", () => {
 
 test("an empty input is refused rather than read as an empty catalog", () => {
   expect(decodeCatalogReply(new Uint8Array(0))).toBeNull();
+});
+
+// --- Directory pages -------------------------------------------------------
+//
+// The crawl moved into the browser, so the browser reads this message too.
+// Same bytes as test/wire_fixtures.test.mo, same whole-message-or-nothing rule.
+
+test("an empty directory page decodes to no entries", () => {
+  expect(decodeDirectoryReply(bytes(fixtures.directory.empty))).toEqual({
+    entries: [],
+    total: 0,
+  });
+});
+
+test("a principal decodes back to the text a crawl can call", () => {
+  const page = decodeDirectoryReply(bytes(fixtures.directory.one));
+  expect(page).toEqual({
+    entries: ["3wvx3-yaaaa-aaaay-aacuq-cai"],
+    total: 1,
+  });
+});
+
+test("a partial page keeps its order and reports the whole it came from", () => {
+  const page = decodeDirectoryReply(bytes(fixtures.directory.partial_page));
+  expect(page?.entries).toEqual([
+    "3wvx3-yaaaa-aaaay-aacuq-cai",
+    "233tv-xiaaa-aaaay-aacta-cai",
+    "bkyz2-fmaaa-aaaaa-qaaaq-cai",
+  ]);
+  // The number that tells a crawl to ask again, not the length of this page.
+  expect(page?.total).toBe(11);
+});
+
+test("a full page of 128 entries is accepted", () => {
+  const page = decodeDirectoryReply(bytes(fixtures.directory.full_page));
+  expect(page?.entries).toHaveLength(128);
+});
+
+// Every refusal is a message a hostile peer could send. A crawl that repaired
+// one would be walking a graph the peer invented.
+test.each(Object.keys(fixtures.directory_invalid))("directory %s is refused", (name) => {
+  const hex = (fixtures.directory_invalid as Record<string, string>)[name];
+  expect(decodeDirectoryReply(bytes(hex))).toBeNull();
+});
+
+test("a directory message past the size ceiling is refused before it is read", () => {
+  expect(decodeDirectoryReply(new Uint8Array(65_537))).toBeNull();
+});
+
+test("a catalog message is not read as a directory page", () => {
+  expect(decodeDirectoryReply(bytes(fixtures.valid.open_single))).toBeNull();
 });

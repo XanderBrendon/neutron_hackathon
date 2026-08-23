@@ -62,6 +62,8 @@ try {
     invalid: Record<string, string>;
     envelope: Record<string, string>;
     envelope_invalid: Record<string, string>;
+    directory: Record<string, string>;
+    directory_invalid: Record<string, string>;
   };
   for (const [section, entries] of Object.entries(parsed)) {
     for (const [name, hex] of Object.entries(entries)) {

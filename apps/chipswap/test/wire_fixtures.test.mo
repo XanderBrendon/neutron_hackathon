@@ -1,4 +1,5 @@
 import Blob "mo:core/Blob";
+import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import IngressWire "../backend/IngressWire";
 import Wire "../backend/Wire";
@@ -109,3 +110,53 @@ let ?unwrapped = IngressWire.unwrapBlobReturn(Blob.fromArray(frameHex), Wire.MAX
     Runtime.trap("one_design refused");
 };
 if (unwrapped != Blob.fromArray(singleHex)) Runtime.trap("the frame did not carry open_single");
+
+// --- Directory pages -------------------------------------------------------
+//
+// The crawl reads this message in the browser now, so this file guards it the
+// same way it guards a catalog: a refusal the Motoko decoder happens to accept
+// would let both sides agree on a page neither should read.
+
+for ((name, hex) in Fixtures.directory.values()) {
+    let ?bytes = Fixtures.unhex(hex) else Runtime.trap("fixture is not hex: " # name);
+    switch (Wire.decodeDirectoryReply(Blob.fromArray(bytes))) {
+        case (?_) {};
+        case null Runtime.trap("valid directory fixture refused: " # name);
+    };
+};
+
+for ((name, hex) in Fixtures.directory_invalid.values()) {
+    let ?bytes = Fixtures.unhex(hex) else Runtime.trap("fixture is not hex: " # name);
+    switch (Wire.decodeDirectoryReply(Blob.fromArray(bytes))) {
+        case (?_) Runtime.trap("invalid directory fixture accepted: " # name);
+        case null {};
+    };
+};
+
+let ?dirEmptyBytes = Fixtures.unhex(lookup(Fixtures.directory, "empty")) else Runtime.trap("directory empty missing");
+let ?dirEmpty = Wire.decodeDirectoryReply(Blob.fromArray(dirEmptyBytes)) else Runtime.trap("directory empty refused");
+if (dirEmpty.entries.size() != 0) Runtime.trap("directory empty carried entries");
+if (dirEmpty.total != 0) Runtime.trap("directory empty claimed a total");
+
+// The principal the TypeScript suite asserts as text. Both sides reading one
+// address out of one byte string is the whole point of the shared fixture.
+let ?dirOneBytes = Fixtures.unhex(lookup(Fixtures.directory, "one")) else Runtime.trap("directory one missing");
+let ?dirOne = Wire.decodeDirectoryReply(Blob.fromArray(dirOneBytes)) else Runtime.trap("directory one refused");
+if (dirOne.entries.size() != 1) Runtime.trap("directory one is not one entry");
+if (Principal.toText(dirOne.entries[0]) != "3wvx3-yaaaa-aaaay-aacuq-cai") {
+    Runtime.trap("directory one lost its principal");
+};
+if (dirOne.total != 1) Runtime.trap("directory one lost its total");
+
+let ?dirPartialBytes = Fixtures.unhex(lookup(Fixtures.directory, "partial_page")) else Runtime.trap("partial_page missing");
+let ?dirPartial = Wire.decodeDirectoryReply(Blob.fromArray(dirPartialBytes)) else Runtime.trap("partial_page refused");
+if (dirPartial.entries.size() != 3) Runtime.trap("partial_page is not three entries");
+if (Principal.toText(dirPartial.entries[1]) != "233tv-xiaaa-aaaay-aacta-cai") {
+    Runtime.trap("partial_page lost its order");
+};
+// The number that tells a crawl to ask again, not the length of this page.
+if (dirPartial.total != 11) Runtime.trap("partial_page lost its total");
+
+let ?dirFullBytes = Fixtures.unhex(lookup(Fixtures.directory, "full_page")) else Runtime.trap("full_page missing");
+let ?dirFull = Wire.decodeDirectoryReply(Blob.fromArray(dirFullBytes)) else Runtime.trap("full_page refused");
+if (dirFull.entries.size() != Wire.MAX_DIRECTORY_PAGE) Runtime.trap("full_page is not a full page");

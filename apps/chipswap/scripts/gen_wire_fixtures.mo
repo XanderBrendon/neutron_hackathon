@@ -3,6 +3,7 @@ import Blob "mo:core/Blob";
 import Debug "mo:core/Debug";
 import Nat8 "mo:core/Nat8";
 import Nat32 "mo:core/Nat32";
+import Principal "mo:core/Principal";
 import IngressWire "../backend/IngressWire";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
@@ -211,6 +212,72 @@ let invalid : [(Text, Blob)] = [
     ("nsfw_required_without_rule", mutate(oneDesign, FLAGS_AT, 16)),
 ];
 
+// --- Directory pages -----------------------------------------------------
+//
+// The message a peer's crawl reads. The browser now decodes this as well as
+// the canister does, so it gets the same treatment the catalog got: every
+// valid case comes from the encoder, and every refusal is a mutation aimed at
+// a field whose offset is derived rather than counted.
+
+let alpha = Principal.fromText("3wvx3-yaaaa-aaaay-aacuq-cai");
+let beta = Principal.fromText("233tv-xiaaa-aaaay-aacta-cai");
+let gamma = Principal.fromText("bkyz2-fmaaa-aaaaa-qaaaq-cai");
+
+// Derived from the encoding rather than assumed: one length byte, then the
+// principal's own bytes.
+let PRINCIPAL_SIZE : Nat = Principal.toBlob(alpha).size();
+let DIR_COUNT_AT : Nat = HEADER; // u16 entry count
+let DIR_ENTRIES_AT : Nat = DIR_COUNT_AT + 2; // first length byte
+
+func encodeDirectory(entries : [Principal], total : Nat) : Blob {
+    Wire.encodeDirectoryReply({ entries; total });
+};
+
+let oneEntry = encodeDirectory([alpha], 1);
+
+let directory : [(Text, Blob)] = [
+    // A peer with nobody to hand over. Not an error, and the crawl must read
+    // it as "finished" rather than "failed".
+    ("empty", encodeDirectory([], 0)),
+    ("one", oneEntry),
+    // A first page: three of eleven, which is what makes the caller ask again.
+    ("partial_page", encodeDirectory([alpha, beta, gamma], 11)),
+    // The last page of that walk: fewer entries than a full page, so the
+    // caller stops without needing the total to tell it.
+    ("final_page", encodeDirectory([gamma], 3)),
+    (
+        "full_page",
+        encodeDirectory(
+            Array.tabulate<Principal>(
+                Wire.MAX_DIRECTORY_PAGE,
+                func(i) { Principal.fromBlob(Blob.fromArray([0, Nat8.fromNat(i % 256), 1])) },
+            ),
+            Wire.MAX_DIRECTORY_PAGE,
+        ),
+    ),
+];
+
+let directory_invalid : [(Text, Blob)] = [
+    ("bad_magic", mutate(oneEntry, 0, 0x44)),
+    // Type 1 is the catalog message, not a directory.
+    ("wrong_type", mutate(oneEntry, 4, 1)),
+    ("old_version", mutate(oneEntry, 5, 2)),
+    // 129 entries, one past the page a directory reply may carry.
+    ("count_over_max", mutate(oneEntry, DIR_COUNT_AT + 1, 129)),
+    ("trailing_byte", append(oneEntry, [0])),
+    // Claims one entry and carries none.
+    ("truncated", truncate(oneEntry, HEADER + 2)),
+    // A principal of no bytes is not a principal.
+    ("principal_zero_length", mutate(oneEntry, DIR_ENTRIES_AT, 0)),
+    // One byte more than any principal has.
+    ("principal_over_max", mutate(oneEntry, DIR_ENTRIES_AT, 30)),
+    // A page longer than the whole it claims to be part of. Paging on this
+    // would never terminate.
+    ("page_over_total", encodeDirectory([alpha, beta, gamma], 1)),
+    // A message that stops after the entries, with no total at all.
+    ("no_total", truncate(oneEntry, DIR_ENTRIES_AT + 1 + PRINCIPAL_SIZE)),
+];
+
 // --- The Candid frame a Blob-returning handler's reply arrives inside -----
 //
 // A peer's catalog does not come back bare. The kernel's dispatcher answers
@@ -271,6 +338,10 @@ Debug.print("  },");
 jsonSection("envelope", envelope);
 Debug.print("  },");
 jsonSection("envelope_invalid", envelope_invalid);
+Debug.print("  },");
+jsonSection("directory", directory);
+Debug.print("  },");
+jsonSection("directory_invalid", directory_invalid);
 Debug.print("  }");
 Debug.print("}");
 
@@ -306,6 +377,10 @@ Debug.print("");
 motokoSection("envelope", envelope);
 Debug.print("");
 motokoSection("envelope_invalid", envelope_invalid);
+Debug.print("");
+motokoSection("directory", directory);
+Debug.print("");
+motokoSection("directory_invalid", directory_invalid);
 Debug.print("");
 Debug.print("    func digit(character : Char) : ?Nat8 {");
 Debug.print("        let point = Char.toNat32(character);");

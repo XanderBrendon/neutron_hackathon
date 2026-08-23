@@ -11,6 +11,7 @@
 // JS number exactly, and rounding one where Motoko does not would be exactly
 // the drift the shared fixtures exist to prevent.
 
+import { Principal } from "@dfinity/principal";
 import { MAX_PALETTE, PIXEL_COUNT, SHAPE_ID, encodeHex } from "./chip.ts";
 import type { NsfwRule, TradeRequirements } from "./requirements.ts";
 
@@ -20,8 +21,12 @@ export const MAX_MESSAGE_BYTES = 65_536;
 export const MAX_DESIGNS = 10;
 export const MAX_TITLE_BYTES = 192;
 export const MAX_SHAPE_ID_BYTES = 32;
+/** One page of a directory reply, matching Wire.mo. */
+export const MAX_DIRECTORY_PAGE = 128;
+export const MAX_PRINCIPAL_BYTES = 29;
 
 const TYPE_CATALOG = 1;
+const TYPE_DIRECTORY = 5;
 
 const FLAG_APPROVAL = 1;
 const FLAG_MIN_COLORS = 2;
@@ -148,6 +153,31 @@ class Reader {
     this.failed = true;
     return false;
   }
+
+  /**
+   * One length-prefixed principal, as the text a caller can address.
+   *
+   * The bytes become text through @dfinity/principal rather than a CRC32 and
+   * base32 written here. A second implementation of that encoding is a second
+   * place for it to be subtly wrong, and every address this returns is one the
+   * crawl will hand to an actor built by the same library.
+   */
+  principal(): string {
+    const length = this.u8();
+    if (this.failed || length === 0 || length > MAX_PRINCIPAL_BYTES) {
+      this.failed = true;
+      return "";
+    }
+    const raw = this.raw(length);
+    if (this.failed) return "";
+    try {
+      // Copied rather than passed as a view: the reader's buffer outlives it.
+      return Principal.fromUint8Array(Uint8Array.from(raw)).toText();
+    } catch {
+      this.failed = true;
+      return "";
+    }
+  }
 }
 
 function has(flags: number, bit: number): boolean {
@@ -260,4 +290,38 @@ export function decodeCatalogReply(bytes: Uint8Array): PeerDesign[] | null {
   }
   if (!reader.done) return null;
   return designs;
+}
+
+/** One page of a peer's directory, as the crawl reads it. */
+export type PeerDirectoryPage = {
+  /** Principal text, in the order the peer sent them. */
+  entries: string[];
+  /**
+   * How many eligible entries the peer says it has in total, which is what
+   * tells a caller whether to ask for another page. It is a number the peer
+   * chose, so nothing may be trusted to it beyond "ask again".
+   */
+  total: number;
+};
+
+/** null means the message was not one we can read. There is no partial read. */
+export function decodeDirectoryReply(
+  bytes: Uint8Array,
+): PeerDirectoryPage | null {
+  const reader = open(bytes, TYPE_DIRECTORY);
+  if (reader === null) return null;
+  const count = reader.u16();
+  if (!reader.ok || count > MAX_DIRECTORY_PAGE) return null;
+  const entries: string[] = [];
+  for (let index = 0; index < count; index += 1) {
+    const entry = reader.principal();
+    if (!reader.ok) return null;
+    entries.push(entry);
+  }
+  const total = reader.u32();
+  if (!reader.ok || !reader.done) return null;
+  // A page longer than the whole is a peer describing something that cannot
+  // exist, and paging on it would never terminate.
+  if (entries.length > total) return null;
+  return { entries, total };
 }
