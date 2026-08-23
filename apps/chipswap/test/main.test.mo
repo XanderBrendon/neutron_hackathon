@@ -6,7 +6,7 @@ import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Chipswap "../backend/main";
-import Memory "../backend/memory/chipswap/v6";
+import Memory "../backend/memory/chipswap/v7";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
 

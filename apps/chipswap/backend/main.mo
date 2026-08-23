@@ -13,7 +13,7 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v6";
+import Memory "./memory/chipswap/v7";
 import PrincipalText "./PrincipalText";
 import Requirements "./Requirements";
 import Shape "./Shape";
@@ -157,7 +157,6 @@ module {
         directory_count : Nat;
         incoming_pending : Nat;
         outgoing_active : Nat;
-        crawl : CrawlView;
         shape_id : Text;
         pixel_count : Nat;
         row_widths : [Nat];
@@ -180,16 +179,6 @@ module {
         strikes : Nat;
         owns_chip : Bool;
         contact_name : ?Text;
-    };
-
-    // What the tile needs to draw a crawl: whether one is running, how far it
-    // has got, and how much of the directory it has still to ask.
-    public type CrawlView = {
-        active : Bool;
-        queried : Nat;
-        discovered : Nat;
-        remaining : Nat;
-        full : Bool;
     };
 
     public type DirectoryPage = {
@@ -257,6 +246,15 @@ module {
         #err : Err;
     };
 
+    // What became of a crawl's finds. `added + skipped` is the size of the
+    // batch, so the tile can report the outcome of every address it offered
+    // instead of assuming they all landed — which matters most in exactly the
+    // case the owner most needs told about, a directory with no room left.
+    public type DirectoryFoundResult = {
+        #ok : { added : Nat; skipped : Nat; full : Bool; revision : Nat };
+        #err : Err;
+    };
+
     public type CreateDesignResult = {
         #ok : { design_id : Nat; revision : Nat };
         #err : Err;
@@ -264,11 +262,6 @@ module {
 
     public type TradeActionResult = {
         #ok : { request_id : Text; outcome : Text; revision : Nat };
-        #err : Err;
-    };
-
-    public type CrawlResult = {
-        #ok : CrawlView;
         #err : Err;
     };
 
@@ -311,6 +304,9 @@ module {
     };
 
     public type DirectoryAddRequest = { canister : Text; source : Text };
+
+    // Everything one crawl found, handed over at the end of it.
+    public type DirectoryFoundRequest = { canisters : [Text] };
 
     public type CanisterRequest = { canister : Text };
 
@@ -404,7 +400,6 @@ module {
     let ROUTE_TRADE : Text = "trade";
     let ROUTE_DELIVER : Text = "deliver";
     let ROUTE_STATUS : Text = "status";
-    let ROUTE_DIRECTORY : Text = "directory";
 
     // Each floor matches capabilities.public_ingress in neutron.json. The sender
     // pays for the work and storage it asks a peer to perform.
@@ -412,15 +407,15 @@ module {
     let DELIVER_CYCLES : Nat = 600_000_000;
     let STATUS_CYCLES : Nat = 200_000_000;
     // A query route declares no floor and can accept nothing, so reading a
-    // peer's catalog or crawling their directory attaches nothing and costs
-    // them nothing.
+    // peer's catalog attaches nothing and costs them nothing.
     let QUERY_ROUTE_CYCLES : Nat = 0;
 
     let CANDID_SLACK : Nat = 64;
-    // One crawl step, bounded by the same concurrency the manifest declares.
-    let MAX_CRAWL_TARGETS : Nat = 8;
-    let CRAWL_PAGE : Nat = 128;
-    let MAX_DIRECTORY_REPLY_BYTES : Nat = 8_192;
+    // The largest batch of found designers one call may carry. It is the size
+    // of the table they are being written into: a request bigger than the
+    // directory could ever hold is not a crawl result, and the background
+    // chunks to fit.
+    let MAX_FOUND_BATCH : Nat = 512;
     let MAX_BRUSH_CELLS : Nat = 49;
     let MAX_BRUSHES : Nat = 16;
     let MAX_BRUSH_NAME_CHARS : Nat = 24;
@@ -467,7 +462,6 @@ module {
                 directory_count = Map.size(mem.directory);
                 incoming_pending = incoming;
                 outgoing_active = outgoing;
-                crawl = crawlView();
                 shape_id = Shape.SHAPE_ID;
                 pixel_count = Shape.PIXEL_COUNT;
                 row_widths = Shape.ROW_WIDTHS;
@@ -911,80 +905,46 @@ module {
             };
         };
 
-        // --- Outbound protocol -----------------------------------------------
+        // --- What a crawl brings back ----------------------------------------
 
-        // --- Crawl -------------------------------------------------------------
-
-        // Begin again from the whole directory. Starting over rather than
-        // resuming is the point of a separate call: a crawl that finished last
-        // week has visited everyone, and asking it to continue would do nothing.
-        public func /*update*/chipswap_crawl_start(()) : CrawlResult {
-            Directory.startCrawl(mem, Time.now());
-            bump();
-            #ok(crawlView());
-        };
-
-        public func /*update*/chipswap_crawl_stop(()) : CrawlResult {
-            Directory.stopCrawl(mem);
-            bump();
-            #ok(crawlView());
-        };
-
-        // One round of the crawl: ask up to eight peers for one page each of
-        // their directory, save whoever is new, and report what is left.
+        // The result of one crawl, seated in one call.
         //
-        // A peer who does not answer is dropped from this crawl rather than
-        // retried, and is never struck for it. The route is a query, and a peer
-        // on the previous release has no query dispatcher at all — retiring a
-        // designer for not having upgraded yet would be a lie about the one
-        // thing that flag claims to know.
-        public func /*update*/chipswap_crawl_step(()) : async* CrawlResult {
-            if (not Directory.crawling(mem)) return #err(error("no_crawl"));
-            let targets = Directory.crawlTargets(mem, MAX_CRAWL_TARGETS);
-            if (targets.size() == 0) {
-                bump();
-                return #ok(crawlView());
+        // There is no crawl here any more, and that is the point. The walk runs
+        // in the browser, against the peers' own public directory route, and
+        // costs this canister nothing: no cycles for a query the browser can
+        // make anonymously, and no managed memory for a frontier that is
+        // meaningful for ninety seconds. What arrives is the conclusion.
+        //
+        // The summary distinguishes what was seated from what was not, because
+        // a full table is a thing the owner has to be told. `Directory.noteFound`
+        // fills the room that exists and never evicts to make more, so `added`
+        // is the number of designers the directory actually gained.
+        public func /*update*/chipswap_directory_note_found(
+            request : DirectoryFoundRequest
+        ) : DirectoryFoundResult {
+            if (request.canisters.size() > MAX_FOUND_BATCH) {
+                return #err(error("too_many"));
             };
-
-            let payloads = Array.map<Directory.CrawlTarget, NeutronCapabilities.BackendCallRequestV1>(
-                targets,
-                func(target) {
-                    routeCall(
-                        target.canister,
-                        INGRESS_QUERY_METHOD,
-                        ROUTE_DIRECTORY,
-                        to_candid ({ offset = target.offset; limit = CRAWL_PAGE } : PeerDirectoryRequest),
-                        QUERY_ROUTE_CYCLES,
-                    );
-                },
-            );
-            let results = await* calls.call_batch(payloads);
-
-            let now = Time.now();
-            var index = 0;
-            while (index < targets.size()) {
-                let target = targets[index];
-                let page = if (index < results.size()) {
-                    directoryFromResult(?results[index]);
-                } else null;
-                switch (page) {
-                    case (?answer) {
-                        ignore Directory.noteCrawlPage(
-                            mem,
-                            target.canister,
-                            target.offset,
-                            answer.entries,
-                            answer.total,
-                            self,
-                            now,
-                        );
-                    };
-                    case null Directory.finishCrawlPeer(mem, target.canister);
+            let found = List.empty<Principal>();
+            var skipped = 0;
+            for (text in request.canisters.values()) {
+                switch (parsePrincipal(text)) {
+                    case (#ok(canister)) List.add(found, canister);
+                    // An address we cannot read is counted, not fatal. These
+                    // strings came from peers, and letting one bad entry
+                    // discard a whole crawl would trade a recoverable partial
+                    // result for a total loss.
+                    case (#err(_)) skipped += 1;
                 };
-                index += 1;
             };
+            let summary = Directory.noteFound(mem, List.toArray(found), self, Time.now());
             bump();
-            #ok(crawlView());
+            #ok({
+                added = summary.added;
+                skipped = summary.skipped + skipped;
+                full = summary.full;
+                revision = mem.revision;
+            });
         };
 
         public func /*update*/chipswap_trade_propose(
@@ -1344,29 +1304,6 @@ module {
                 case (#err(_)) null;
                 case (#ok(reply)) unwrapReply(reply, maxReplyBytes);
             };
-        };
-
-        func crawlView() : CrawlView {
-            let progress = Directory.crawlProgress(mem);
-            {
-                active = progress.active;
-                queried = progress.queried;
-                discovered = progress.discovered;
-                remaining = progress.remaining;
-                full = progress.full;
-            };
-        };
-
-        func directoryFromResult(
-            result : ?NeutronCapabilities.BackendCallResultV1
-        ) : ?Wire.DirectoryReply {
-            let ?outcome = result else return null;
-            let reply = switch (outcome) {
-                case (#err(_)) return null;
-                case (#ok(bytes)) bytes;
-            };
-            let ?payload = unwrapReply(reply, MAX_DIRECTORY_REPLY_BYTES) else return null;
-            Wire.decodeDirectoryReply(payload);
         };
 
         func catalogFromResult(
@@ -1835,14 +1772,8 @@ public type chipswap_brush_delete_Output = RevisionResult;
 public type chipswap_trade_forget_Input = (request : TradeRequestRef);
 public type chipswap_trade_forget_Output = RevisionResult;
 
-public type chipswap_crawl_start_Input = (());
-public type chipswap_crawl_start_Output = CrawlResult;
-
-public type chipswap_crawl_stop_Input = (());
-public type chipswap_crawl_stop_Output = CrawlResult;
-
-public type chipswap_crawl_step_Input = (());
-public type chipswap_crawl_step_Output = CrawlResult;
+public type chipswap_directory_note_found_Input = (request : DirectoryFoundRequest);
+public type chipswap_directory_note_found_Output = DirectoryFoundResult;
 
 public type chipswap_trade_propose_Input = (request : ProposeTradeRequest);
 public type chipswap_trade_propose_Output = TradeActionResult;

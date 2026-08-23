@@ -2,7 +2,7 @@
   "format": 3,
   "name": "Chipswap",
   "id": "chipswap",
-  "version": 118,
+  "version": 117,
   "update_source": "233tv-xiaaa-aaaay-aacta-cai",
   "description": "Design, publish, and trade pixel chips between Neutron canisters",
   "src": "main.mo",
@@ -94,7 +94,7 @@
           "id": "directory",
           "handler": "chipswap_directory_v1",
           "mode": "query",
-          "caller": "canister",
+          "caller": "any",
           "max_request_bytes": 1024,
           "max_response_bytes": 8192
         }
@@ -120,16 +120,14 @@
         "chipswap_directory_remove",
         "chipswap_directory_set_ignored",
         "chipswap_directory_set_retired",
+        "chipswap_directory_note_found",
         "chipswap_brush_save",
         "chipswap_brush_delete",
         "chipswap_trade_forget",
         "chipswap_trade_propose",
         "chipswap_trade_resolve",
         "chipswap_trade_accept",
-        "chipswap_trade_decline",
-        "chipswap_crawl_start",
-        "chipswap_crawl_step",
-        "chipswap_crawl_stop"
+        "chipswap_trade_decline"
       ]
     },
     "backend_calls": {
@@ -222,6 +220,10 @@
       "type": "update",
       "async": false
     },
+    "chipswap_directory_note_found": {
+      "type": "update",
+      "async": false
+    },
     "chipswap_brush_save": {
       "type": "update",
       "async": false
@@ -233,18 +235,6 @@
     "chipswap_trade_forget": {
       "type": "update",
       "async": false
-    },
-    "chipswap_crawl_start": {
-      "type": "update",
-      "async": false
-    },
-    "chipswap_crawl_stop": {
-      "type": "update",
-      "async": false
-    },
-    "chipswap_crawl_step": {
-      "type": "update",
-      "async": "async*"
     },
     "chipswap_trade_propose": {
       "type": "update",
@@ -300,7 +290,7 @@
   },
   "memory": {
     "chipswap": {
-      "version": 6,
+      "version": 7,
       "schemas": {
         "1": {
           "src": "memory/chipswap/v1.mo"
@@ -319,6 +309,9 @@
         },
         "6": {
           "src": "memory/chipswap/v6.mo"
+        },
+        "7": {
+          "src": "memory/chipswap/v7.mo"
         }
       },
       "migrations": [
@@ -346,6 +339,11 @@
           "from": 5,
           "to": 6,
           "src": "memory/chipswap/v5_to_v6.mo"
+        },
+        {
+          "from": 6,
+          "to": 7,
+          "src": "memory/chipswap/v6_to_v7.mo"
         }
       ]
     }

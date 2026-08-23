@@ -1,4 +1,5 @@
-// One anonymous query to a peer's catalog route.
+// Anonymous queries to a peer's public routes: their catalog, and their
+// directory page for the crawl.
 //
 // Three formats are nested here. The outer two are Candid: the ingress
 // envelope the peer's dispatcher decodes, and the result variant it answers
@@ -20,12 +21,15 @@ import { icHost } from "neutron-tools/src/runtime.js";
 import { unwrapBlobReturn } from "../ingress_wire.ts";
 import {
   decodeCatalogReply,
+  decodeDirectoryReply,
   MAX_MESSAGE_BYTES,
   type PeerDesign,
+  type PeerDirectoryPage,
 } from "../wire.ts";
 
 const PHYSICAL_METHOD = "app_chipswap__chipswap_v1_query";
-const ROUTE_ID = "catalog";
+const ROUTE_CATALOG = "catalog";
+const ROUTE_DIRECTORY = "directory";
 /**
  * The gateway every other Neutron surface queries through, and the one the
  * background's connect-src names. Spelling it here instead of importing it
@@ -63,6 +67,22 @@ const idlFactory = () =>
 /** The empty record the catalog route takes, encoded once. */
 const EMPTY_REQUEST = new Uint8Array(IDL.encode([IDL.Record({})], [{}]));
 
+/** The record `chipswap_directory_v1` declares: `{ offset : Nat; limit : Nat }`. */
+const DirectoryRequest = IDL.Record({ offset: IDL.Nat, limit: IDL.Nat });
+
+/**
+ * One directory request. Unlike the catalog's empty record this carries a
+ * position, so it is encoded per call rather than once.
+ */
+export function encodeDirectoryRequest(
+  offset: number,
+  limit: number,
+): Uint8Array {
+  return new Uint8Array(
+    IDL.encode([DirectoryRequest], [{ offset, limit }]),
+  );
+}
+
 function isLocalHost(host: string): boolean {
   return /(^|\.)localhost(:|$)|^127\.0\.0\.1(:|$)/.test(host);
 }
@@ -90,9 +110,22 @@ function agent(): Promise<HttpAgent> {
   return agentPromise;
 }
 
-export type CatalogFetch = { designs: PeerDesign[] } | { error: string };
+/** The bytes a route answered with, or why we have none. */
+type RouteReply = { payload: Uint8Array } | { error: string };
 
-export async function fetchCatalog(designer: string): Promise<CatalogFetch> {
+/**
+ * One anonymous query to one of a peer's public routes.
+ *
+ * Everything both routes share lives here: the actor, the ingress envelope,
+ * the error variant, and the second Candid layer around a Blob-returning
+ * handler. What differs between them is the route id, the argument, and the
+ * message inside — which is exactly what the callers below supply.
+ */
+async function queryRoute(
+  designer: string,
+  route: string,
+  payload: Uint8Array,
+): Promise<RouteReply> {
   try {
     const actor = Actor.createActor(idlFactory, {
       agent: await agent(),
@@ -101,7 +134,7 @@ export async function fetchCatalog(designer: string): Promise<CatalogFetch> {
     const call = actor[PHYSICAL_METHOD] as (
       request: { method: string; payload: Uint8Array },
     ) => Promise<{ ok?: Uint8Array | number[]; err?: Record<string, null> }>;
-    const reply = await call({ method: ROUTE_ID, payload: EMPTY_REQUEST });
+    const reply = await call({ method: route, payload });
 
     if (reply.err !== undefined) {
       // A peer still on caller "canister" answers unauthorized. That is a
@@ -115,12 +148,45 @@ export async function fetchCatalog(designer: string): Promise<CatalogFetch> {
     // the handler's Blob return is still encoded underneath it.
     const inner = unwrapBlobReturn(Uint8Array.from(reply.ok), MAX_MESSAGE_BYTES);
     if (inner === null) return { error: "malformed_envelope" };
-
-    const designs = decodeCatalogReply(inner);
-    // A message we cannot read is refused whole rather than partly kept.
-    if (designs === null) return { error: "undecodable" };
-    return { designs };
+    return { payload: inner };
   } catch (error) {
     return { error: error instanceof Error ? error.message : "unreachable" };
   }
+}
+
+export type CatalogFetch = { designs: PeerDesign[] } | { error: string };
+
+export async function fetchCatalog(designer: string): Promise<CatalogFetch> {
+  const reply = await queryRoute(designer, ROUTE_CATALOG, EMPTY_REQUEST);
+  if ("error" in reply) return reply;
+  const designs = decodeCatalogReply(reply.payload);
+  // A message we cannot read is refused whole rather than partly kept.
+  if (designs === null) return { error: "undecodable" };
+  return { designs };
+}
+
+export type DirectoryFetch = { page: PeerDirectoryPage } | { error: string };
+
+/**
+ * One page of a peer's directory, for the crawl.
+ *
+ * Nothing read here is trusted beyond "somebody to ask next". The entries are
+ * addresses, and an address a hostile peer invented costs us one query that
+ * goes nowhere — which is why this route is worth reading anonymously and why
+ * nothing it returns may be minted against.
+ */
+export async function fetchDirectoryPage(
+  designer: string,
+  offset: number,
+  limit: number,
+): Promise<DirectoryFetch> {
+  const reply = await queryRoute(
+    designer,
+    ROUTE_DIRECTORY,
+    encodeDirectoryRequest(offset, limit),
+  );
+  if ("error" in reply) return reply;
+  const page = decodeDirectoryReply(reply.payload);
+  if (page === null) return { error: "undecodable" };
+  return { page };
 }

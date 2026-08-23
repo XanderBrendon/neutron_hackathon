@@ -4,7 +4,7 @@ import Map "mo:core/Map";
 import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Text "mo:core/Text";
-import Memory "./memory/chipswap/v6";
+import Memory "./memory/chipswap/v7";
 
 // The chips this Neutron holds. A chip is spendable only while `#held`: an offer
 // in flight is `#escrowed`, and an offer whose outcome was never confirmed is

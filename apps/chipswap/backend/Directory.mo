@@ -7,14 +7,17 @@ import Principal "mo:core/Principal";
 import Text "mo:core/Text";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v6";
-import Set "mo:core/Set";
+import Memory "./memory/chipswap/v7";
 
-// The designer directory and the crawl that fills it.
+// The designer directory: who the owner knows, and what we have concluded
+// about them.
 //
-// Catalogs are not here. A peer's published designs are read by the browser,
-// from the peer, and kept on the machine that asked; this canister keeps only
-// who the owner knows and what it has concluded about them.
+// Neither the catalogs nor the crawl are here any more. A peer's published
+// designs are read by the browser, from the peer, and kept on the machine that
+// asked. The walk that finds new designers is the browser's too, and reaches
+// this module only as its result — a batch of addresses handed to `noteFound`
+// when the crawl is done. What stays here is every judgement about a designer,
+// because that is the owner's data rather than a passing state.
 //
 // Nothing arrives here unasked, with one exception the table names out loud. A
 // designer is here because the owner typed them in, because they proposed a
@@ -107,9 +110,9 @@ module {
         };
     };
 
-    // Whether we will spend a call on this designer at all. Both flags mean the
-    // same thing here, which is the point: the crawl, the trade routes and the
-    // page we serve peers all ask this one question.
+    // Whether this designer may be approached at all. Both flags mean the same
+    // thing here, which is the point: the trade routes, the page we serve
+    // peers, and the frontier we hand a crawl all ask this one question.
     public func active(entry : Memory.DirectoryEntry) : Bool {
         not entry.ignored and not entry.retired;
     };
@@ -293,150 +296,78 @@ module {
         };
     };
 
-    // --- Crawl -------------------------------------------------------------
+    // --- What a crawl brings back ------------------------------------------
 
-    public type CrawlProgress = {
-        active : Bool;
-        queried : Nat;
-        discovered : Nat;
-        remaining : Nat;
+    // The result of one crawl, seated in one call.
+    //
+    // The walk that produced this list happened in the browser, which is where
+    // a walk belongs: it is meaningful for about ninety seconds and costs this
+    // canister nothing to have skipped. What arrives here is only its
+    // conclusion — a batch of addresses, once, when the crawl finished or was
+    // stopped.
+    //
+    // Every rule about who may be in the table is still this module's. A
+    // batch cannot introduce this canister to itself, cannot reinstate an
+    // ignored designer, cannot overwrite how we actually met somebody, and
+    // cannot grow the table past `MAX_DIRECTORY`.
+    public type FoundSummary = {
+        // Designers who were not here and now are.
+        added : Nat;
+        // Designers the table already had, plus this canister itself, plus any
+        // the table had no room to seat. `added + skipped` is always the size
+        // of the batch, so a caller can report what became of every address it
+        // offered rather than assuming they all landed.
+        skipped : Nat;
         full : Bool;
     };
 
-    public type CrawlTarget = {
-        canister : Principal;
-        offset : Nat;
-    };
-
-    public func startCrawl(mem : Memory.Mem, now : Int) : () {
-        mem.crawl := ?{
-            started_at_ns = now;
-            var queried = 0;
-            var discovered = 0;
-            visited = Set.empty<Principal>();
-            cursors = Map.empty<Principal, Nat>();
-        };
-    };
-
-    public func stopCrawl(mem : Memory.Mem) : () {
-        mem.crawl := null;
-    };
-
-    public func crawling(mem : Memory.Mem) : Bool {
-        switch (mem.crawl) {
-            case (?_) true;
-            case null false;
-        };
-    };
-
-    // The peers a step should call: those already part-read first, so a long
-    // directory is finished rather than left half-collected behind newer work,
-    // then eligible entries this crawl has not touched.
-    public func crawlTargets(mem : Memory.Mem, limit : Nat) : [CrawlTarget] {
-        let ?crawl = mem.crawl else return [];
-        if (limit == 0) return [];
-        // Both loops walk a map keyed by principal, which iterates in key
-        // order, so a step's batch is the same batch every time it is derived
-        // from the same state. A crawl that cannot be replayed cannot be
-        // debugged from a bug report.
-        let picked = List.empty<CrawlTarget>();
-        for ((canister, offset) in Map.entries(crawl.cursors)) {
-            if (List.size(picked) < limit) {
-                // A cursor can outlive its entry: the designer was ignored, or
-                // removed, while their directory was half-read. The frontier is
-                // the table, so the table decides.
-                switch (get(mem, canister)) {
-                    case (?entry) if (active(entry)) List.add(picked, { canister; offset });
-                    case null {};
+    // A batch fills the room the table has. It never evicts.
+    //
+    // This is the one place `note`'s eviction is deliberately not used, and the
+    // reason is that a batch is the only caller that can collide with itself. A
+    // crawl offering ten designers into a full table would, entry by entry,
+    // evict the ones it had just seated — leaving two of the ten and reporting
+    // ten, which is the number the owner would then see. Every other route
+    // writes one designer the owner is actively dealing with, and eviction
+    // there is a fair trade for a designer who arrived long ago and has not
+    // been seen since.
+    //
+    // So a crawl gets the empty seats and no more. `#crawl` is the least
+    // authoritative source there is, and a directory that reshuffled itself
+    // every time the owner pressed "Find more designers" would be worse than
+    // one that filled up and said so.
+    public func noteFound(
+        mem : Memory.Mem,
+        canisters : [Principal],
+        self : Principal,
+        now : Int,
+    ) : FoundSummary {
+        var added = 0;
+        var skipped = 0;
+        for (canister in canisters.values()) {
+            if (Principal.equal(canister, self)) {
+                skipped += 1;
+            } else switch (get(mem, canister)) {
+                case (?_) {
+                    // Already known. The sighting is still worth recording —
+                    // it is evidence the designer is still being passed
+                    // around — but it changes nothing else about the entry.
+                    ignore note(mem, canister, #crawl, now);
+                    skipped += 1;
+                };
+                case null {
+                    if (Map.size(mem.directory) >= MAX_DIRECTORY) {
+                        skipped += 1;
+                    } else {
+                        ignore note(mem, canister, #crawl, now);
+                        added += 1;
+                    };
                 };
             };
         };
-        for ((canister, entry) in Map.entries(mem.directory)) {
-            if (
-                List.size(picked) < limit and
-                active(entry) and
-                not Set.contains(crawl.visited, Principal.compare, canister) and
-                Map.get(crawl.cursors, Principal.compare, canister) == null
-            ) List.add(picked, { canister; offset = 0 });
-        };
-        List.toArray(picked);
-    };
-
-    // A peer answered with one page. `total` is a number they chose, so paging
-    // on it is bounded twice over: the offset only advances while they are
-    // actually sending entries, and it stops at the largest directory anyone
-    // could honestly have. A peer claiming four billion entries and handing over
-    // one at a time gets four pages like everybody else.
-    public func noteCrawlPage(
-        mem : Memory.Mem,
-        canister : Principal,
-        offset : Nat,
-        entries : [Principal],
-        total : Nat,
-        self : Principal,
-        now : Int,
-    ) : Nat {
-        let ?crawl = mem.crawl else return 0;
-        // Refuse a page that does not answer the question we asked. A reply
-        // arriving after the crawl was stopped and started again describes a
-        // position in a walk that no longer exists, and acting on it would mark
-        // a peer finished whose beginning this crawl never read.
-        let expected = switch (Map.get(crawl.cursors, Principal.compare, canister)) {
-            case (?value) value;
-            case null 0;
-        };
-        if (expected != offset) return 0;
-        if (Set.contains(crawl.visited, Principal.compare, canister)) return 0;
-
-        var added = 0;
-        for (candidate in entries.values()) {
-            if (not Principal.equal(candidate, self)) {
-                if (note(mem, candidate, #crawl, now)) added += 1;
-            };
-        };
-        crawl.discovered += added;
-        let next = offset + entries.size();
-        if (entries.size() == 0 or next >= total or next >= MAX_DIRECTORY) {
-            finishCrawlPeer(mem, canister);
-        } else {
-            Map.add(crawl.cursors, Principal.compare, canister, next);
-        };
-        added;
-    };
-
-    // A peer we will not ask again this crawl, because they answered everything
-    // they had or because they did not answer at all.
-    public func finishCrawlPeer(mem : Memory.Mem, canister : Principal) : () {
-        let ?crawl = mem.crawl else return;
-        Map.remove(crawl.cursors, Principal.compare, canister);
-        if (not Set.contains(crawl.visited, Principal.compare, canister)) {
-            Set.add(crawl.visited, Principal.compare, canister);
-            crawl.queried += 1;
-        };
-    };
-
-    public func crawlProgress(mem : Memory.Mem) : CrawlProgress {
-        let ?crawl = mem.crawl else {
-            return {
-                active = false;
-                queried = 0;
-                discovered = 0;
-                remaining = 0;
-                full = Map.size(mem.directory) >= MAX_DIRECTORY;
-            };
-        };
-        var remaining = 0;
-        for ((canister, entry) in Map.entries(mem.directory)) {
-            if (
-                active(entry) and
-                not Set.contains(crawl.visited, Principal.compare, canister)
-            ) remaining += 1;
-        };
         {
-            active = true;
-            queried = crawl.queried;
-            discovered = crawl.discovered;
-            remaining;
+            added;
+            skipped;
             full = Map.size(mem.directory) >= MAX_DIRECTORY;
         };
     };

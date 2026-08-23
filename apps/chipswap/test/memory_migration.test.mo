@@ -4,26 +4,29 @@ import Map "mo:core/Map";
 import Nat "mo:core/Nat";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
+import Set "mo:core/Set";
 import Text "mo:core/Text";
 import Migrate "../backend/memory/chipswap/v1_to_v2";
 import Migrate3 "../backend/memory/chipswap/v2_to_v3";
 import Migrate4 "../backend/memory/chipswap/v3_to_v4";
 import Migrate5 "../backend/memory/chipswap/v4_to_v5";
 import Migrate6 "../backend/memory/chipswap/v5_to_v6";
+import Migrate7 "../backend/memory/chipswap/v6_to_v7";
 import V1 "../backend/memory/chipswap/v1";
 import V3 "../backend/memory/chipswap/v3";
 import V4 "../backend/memory/chipswap/v4";
 import V5 "../backend/memory/chipswap/v5";
 import V6 "../backend/memory/chipswap/v6";
+import V7 "../backend/memory/chipswap/v7";
 
 // Migration from the released schemas, with something in every root. Compiling
 // proves the shapes line up; only this proves the values arrive intact and that
 // the trade mode became the requirement it stood for.
 //
-// The file walks all three legs in order, because that is the upgrade a
-// canister still running version 1 actually performs: the kernel composes
-// 1 -> 2 -> 3 -> 4 into one atomic upgrade, so each leg is fed exactly what the
-// one before it produced rather than a hand-built fixture.
+// The file walks every leg in order, because that is the upgrade a canister
+// still running version 1 actually performs: the kernel composes them into one
+// atomic upgrade, so each leg is fed exactly what the one before it produced
+// rather than a hand-built fixture.
 
 let designer = Principal.fromBlob(Blob.fromArray([0, 1, 1]));
 let peer = Principal.fromBlob(Blob.fromArray([0, 2, 1]));
@@ -587,3 +590,60 @@ switch (emptied6.crawl) {
     case null {};
     case (?_) Runtime.trap("a migration started a crawl");
 };
+
+// --- V6 -> V7 -----------------------------------------------------------
+
+// A canister upgrading in the middle of a crawl. V6 could be mid-walk when the
+// install transaction runs, so the fixture is put in exactly that state: the
+// migration has to drop it, and dropping it must not disturb anything else.
+let midCrawl : V6.Crawl = {
+    started_at_ns = 900;
+    var queried = 4;
+    var discovered = 2;
+    visited = Set.empty<Principal>();
+    cursors = Map.empty<Principal, Nat>();
+};
+Set.add(midCrawl.visited, Principal.compare, peer);
+Map.add(midCrawl.cursors, Principal.compare, exchangedPeer, 128);
+v6.crawl := ?midCrawl;
+
+let v7 : V7.Mem = Migrate7.migrate(v6);
+
+assert (v7.revision == v6.revision);
+assert (v7.next_request_seq == v6.next_request_seq);
+assert (v7.next_brush_id == v6.next_brush_id);
+
+// The directory is the owner's, and it is what a crawl was ever for. Every
+// judgement in it survives the schema that stopped describing the walk.
+assert (Map.size(v7.directory) == Map.size(v6.directory));
+let ?carried7 = Map.get(v7.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+assert (carried7.source == carried6.source);
+assert (carried7.first_seen_ns == carried6.first_seen_ns);
+assert (carried7.last_seen_ns == carried6.last_seen_ns);
+assert (carried7.ignored == carried6.ignored);
+assert (carried7.retired == carried6.retired);
+assert (carried7.strikes == carried6.strikes);
+// A designer a crawl introduced is still one a crawl introduced. Dropping the
+// walk does not rewrite how we met the people it found.
+let ?crawled7 = Map.get(v7.directory, Principal.compare, exchangedPeer) else Runtime.trap("missing entry");
+assert (crawled7.source == #crawl);
+
+// Nothing that was never the crawl's goes with it.
+let ?draft7 = Map.get(v7.designs, Nat.compare, 3) else Runtime.trap("missing design");
+assert (draft7.state == #draft);
+assert (draft7.art.pixels == Blob.fromArray([0, 1, 0]));
+let ?sent7 = Map.get(v7.holdings, Text.compare, "sent") else Runtime.trap("missing chip");
+switch (sent7.state) {
+    case (#escrowed(details)) assert (details.request_id == requestId);
+    case (_) Runtime.trap("escrow was not preserved");
+};
+assert (Map.size(v7.incoming) == Map.size(v6.incoming));
+assert (Map.size(v7.outgoing) == Map.size(v6.outgoing));
+let ?replay7 = Map.get(v7.replay, Text.compare, "replay") else Runtime.trap("missing replay");
+assert (replay7.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
+let ?brush7 = List.get(v7.brushes, 0) else Runtime.trap("missing brush");
+assert (brush7.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+// And an emptied directory is still empty at the end of the whole chain.
+let emptied7 = Migrate7.migrate(emptied6);
+assert (Map.size(emptied7.directory) == 0);

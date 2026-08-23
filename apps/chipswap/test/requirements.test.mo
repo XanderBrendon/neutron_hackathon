@@ -3,7 +3,7 @@ import Blob "mo:core/Blob";
 import Nat32 "mo:core/Nat32";
 import Nat8 "mo:core/Nat8";
 import Requirements "../backend/Requirements";
-import Memory "../backend/memory/chipswap/v6";
+import Memory "../backend/memory/chipswap/v7";
 import Shape "../backend/Shape";
 
 // The arithmetic a trade turns on. `src/requirements.ts` runs the same

@@ -8,7 +8,7 @@ import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v6";
+import Memory "../backend/memory/chipswap/v7";
 import Shape "../backend/Shape";
 
 func principalOf(seed : Nat) : Principal {
@@ -268,89 +268,71 @@ assert (revived.strikes == 0);
 assert (Directory.setRetired(strikes, principalOf(998), false) == false);
 assert (Directory.noteUnreachable(strikes, principalOf(998), 1) == false);
 
-// --- The crawl --------------------------------------------------------------
+// --- What a crawl brings back ------------------------------------------------
+//
+// The walk itself is the browser's now (src/resident/crawl.ts). What reaches
+// this canister is its result: a batch of addresses, arriving once, when the
+// crawl is done or stopped. Everything the table decides about a designer
+// still gets decided here.
 
-let crawling = blank();
-ignore Directory.note(crawling, alice, #manual, 1);
-ignore Directory.note(crawling, bob, #manual, 1);
-ignore Directory.note(crawling, carol, #manual, 1);
-assert (Directory.setIgnored(crawling, carol, true));
+let found = blank();
+ignore Directory.note(found, alice, #manual, 1);
 
-// Nothing to do until a crawl is started, and no state to trip over.
-assert (Directory.crawling(crawling) == false);
-assert (Directory.crawlTargets(crawling, 8).size() == 0);
-assert (Directory.crawlProgress(crawling).active == false);
-
-Directory.startCrawl(crawling, 100);
-assert (Directory.crawling(crawling));
-// The frontier is the directory: everyone eligible, and carol is not.
-let opening = Directory.crawlProgress(crawling);
-assert (opening.remaining == 2);
-assert (opening.queried == 0);
-assert (opening.discovered == 0);
-let firstTargets = Directory.crawlTargets(crawling, 8);
-assert (firstTargets.size() == 2);
-for (target in firstTargets.values()) {
-    assert (target.canister != carol);
-    assert (target.offset == 0);
+// A batch seats the designers it carries and attributes them to the crawl.
+let firstBatch = Directory.noteFound(found, [bob, carol], self, 100);
+assert (firstBatch.added == 2);
+assert (firstBatch.skipped == 0);
+assert (firstBatch.full == false);
+switch (Directory.get(found, bob)) {
+    case (?entry) assert (entry.source == #crawl);
+    case null Runtime.trap("a found designer was not seated");
 };
-// A batch smaller than the frontier takes part of it.
-assert (Directory.crawlTargets(crawling, 1).size() == 1);
-assert (Directory.crawlTargets(crawling, 0).size() == 0);
 
-// A peer whose directory is longer than one page keeps a cursor, and the next
-// batch returns to them before starting anyone new.
-let discovered = Directory.noteCrawlPage(crawling, alice, 0, [principalOf(31), principalOf(32)], 5, self, 200);
-assert (discovered == 2);
-assert (Map.size(crawling.directory) == 5);
-let midway = Directory.crawlTargets(crawling, 8);
-assert (midway[0].canister == alice);
-assert (midway[0].offset == 2);
+// A designer we already had is not added again, and keeps the source that says
+// how we actually met them. A crawl reporting alice does not overwrite the fact
+// that the owner typed her in.
+let repeat = Directory.noteFound(found, [alice, bob], self, 110);
+assert (repeat.added == 0);
+assert (repeat.skipped == 2);
+switch (Directory.get(found, alice)) {
+    case (?entry) assert (entry.source == #manual);
+    case null Runtime.trap("a known designer was dropped by a batch");
+};
 
-// Whatever a crawl finds is saved, and found twice is not found again.
-assert (Directory.noteCrawlPage(crawling, alice, 2, [principalOf(31), principalOf(33)], 5, self, 210) == 1);
 // Our own address never enters our own directory, however many peers list it.
-assert (Directory.noteCrawlPage(crawling, alice, 4, [self], 5, self, 220) == 0);
-assert (Directory.get(crawling, self) == null);
-// The last page drains the peer: offset plus what they sent reached their total.
-assert (Directory.crawlProgress(crawling).queried == 1);
-for (target in Directory.crawlTargets(crawling, 8).values()) {
-    assert (target.canister != alice);
+let selfBatch = Directory.noteFound(found, [self], self, 120);
+assert (selfBatch.added == 0);
+assert (selfBatch.skipped == 1);
+assert (Directory.get(found, self) == null);
+
+// One batch naming the same designer twice found one designer.
+let duplicates = blank();
+let twice = Directory.noteFound(duplicates, [alice, alice], self, 130);
+assert (twice.added == 1);
+assert (twice.skipped == 1);
+
+// An empty batch is a no-op rather than an error: a crawl that found nobody
+// still finishes, and still says so.
+let nothing = Directory.noteFound(duplicates, [], self, 140);
+assert (nothing.added == 0);
+assert (nothing.skipped == 0);
+
+// Every address is accounted for. A caller that reported "found 40" while the
+// table seated 12 would be describing a crawl that did not happen.
+let ceiling = blank();
+var filler = 100;
+while (Map.size(ceiling.directory) < Directory.MAX_DIRECTORY - 2) {
+    ignore Directory.note(ceiling, principalOf(filler), #manual, 10 + filler);
+    filler += 1;
 };
-
-// A peer who says nothing is finished rather than asked forever.
-assert (Directory.noteCrawlPage(crawling, bob, 0, [], 9, self, 230) == 0);
-assert (Directory.crawlProgress(crawling).queried == 2);
-
-// Ignoring a designer mid-crawl takes them out of the frontier without anything
-// having to be told: the frontier is derived, so there is no queue to correct.
-let beforeIgnoring = Directory.crawlProgress(crawling).remaining;
-assert (beforeIgnoring == 3);
-assert (Directory.setIgnored(crawling, principalOf(31), true));
-assert (Directory.crawlProgress(crawling).remaining == 2);
-
-// Progress accumulates across the whole crawl rather than per step.
-let running = Directory.crawlProgress(crawling);
-assert (running.active);
-assert (running.queried == 2);
-assert (running.discovered == 3);
-assert (running.full == false);
-
-// Stopping clears the state, and a stopped crawl accepts no more pages.
-Directory.stopCrawl(crawling);
-assert (Directory.crawling(crawling) == false);
-assert (Directory.noteCrawlPage(crawling, bob, 0, [principalOf(41)], 1, self, 240) == 0);
-assert (Directory.get(crawling, principalOf(41)) == null);
-assert (Directory.crawlTargets(crawling, 8).size() == 0);
-
-// Starting again re-visits everyone a crawl may still reach: the two we asked
-// last time and the two they taught us about, but not the two that are ignored.
-// A crawl that finished has nothing left to resume, which is why starting over
-// is a separate decision rather than a continuation.
-Directory.startCrawl(crawling, 300);
-assert (Directory.crawlProgress(crawling).remaining == 4);
-assert (Directory.crawlProgress(crawling).queried == 0);
-assert (Directory.crawlProgress(crawling).discovered == 0);
+let overflow = Array.tabulate<Principal>(10, func(i) { principalOf(9_000 + i) });
+let squeezed = Directory.noteFound(ceiling, overflow, self, 150);
+assert (squeezed.added + squeezed.skipped == overflow.size());
+// Chosen entries are never given up for a crawl's finds, so the table stops at
+// its limit rather than trading away designers the owner asked for.
+assert (squeezed.added == 2);
+assert (squeezed.full);
+assert (Map.size(ceiling.directory) == Directory.MAX_DIRECTORY);
 
 // Only a peer's own silence is evidence against them. Every other code the
 // broker returns describes something that went wrong on this side, and an
@@ -361,88 +343,6 @@ assert (Directory.strikeable("capability_revoked") == false);
 assert (Directory.strikeable("not_reserved") == false);
 assert (Directory.strikeable("reply_limit") == false);
 assert (Directory.strikeable("") == false);
-
-// A peer who claims a directory far larger than anyone can hold, and hands it
-// over one entry at a time, is paged to the honest ceiling and no further.
-let lying = blank();
-ignore Directory.note(lying, alice, #manual, 1);
-Directory.startCrawl(lying, 1);
-var lyingPages = 0;
-label paging loop {
-    var pending : ?Nat = null;
-    for (target in Directory.crawlTargets(lying, 8).values()) {
-        if (target.canister == alice) pending := ?target.offset;
-    };
-    switch (pending) {
-        case null break paging;
-        case (?offset) {
-            ignore Directory.noteCrawlPage(
-                lying,
-                alice,
-                offset,
-                [bob],
-                4_294_967_295,
-                self,
-                2,
-            );
-            lyingPages += 1;
-        };
-    };
-    // A safety net well above the ceiling, so a regression fails this test
-    // rather than hanging it.
-    if (lyingPages > Directory.MAX_DIRECTORY + 8) break paging;
-};
-assert (lyingPages == Directory.MAX_DIRECTORY);
-for (target in Directory.crawlTargets(lying, 8).values()) {
-    assert (target.canister != alice);
-};
-
-// A page that does not answer the question we asked is refused. A reply that
-// arrives after a crawl was restarted describes a position in a walk that no
-// longer exists, and acting on it would mark a peer finished whose beginning
-// this crawl never read.
-let stale = blank();
-ignore Directory.note(stale, alice, #manual, 1);
-Directory.startCrawl(stale, 1);
-// Part-way through a long directory.
-assert (Directory.noteCrawlPage(stale, alice, 0, [principalOf(61)], 9, self, 2) == 1);
-// The same crawl, but a page from a position we are not at.
-assert (Directory.noteCrawlPage(stale, alice, 0, [principalOf(62)], 9, self, 3) == 0);
-assert (Directory.get(stale, principalOf(62)) == null);
-assert (Directory.noteCrawlPage(stale, alice, 7, [principalOf(63)], 9, self, 4) == 0);
-assert (Directory.get(stale, principalOf(63)) == null);
-// The page we are actually waiting for still lands.
-assert (Directory.noteCrawlPage(stale, alice, 1, [principalOf(64)], 9, self, 5) == 1);
-
-// After a restart the walk begins again, so the tail of the old one is refused
-// while a fresh first page is accepted.
-Directory.startCrawl(stale, 6);
-assert (Directory.noteCrawlPage(stale, alice, 2, [principalOf(65)], 9, self, 7) == 0);
-assert (Directory.get(stale, principalOf(65)) == null);
-assert (Directory.noteCrawlPage(stale, alice, 0, [principalOf(65)], 9, self, 8) == 1);
-
-// A peer already drained this crawl is not re-read by a late reply either.
-Directory.finishCrawlPeer(stale, alice);
-assert (Directory.noteCrawlPage(stale, alice, 0, [principalOf(66)], 9, self, 9) == 0);
-assert (Directory.get(stale, principalOf(66)) == null);
-
-// A cursor can outlive the entry it points at. Removing or ignoring a designer
-// whose directory is half-read takes them out of the batch as well as out of
-// the count, so the two never disagree about what is left.
-let orphaned = blank();
-ignore Directory.note(orphaned, alice, #manual, 1);
-ignore Directory.note(orphaned, bob, #manual, 1);
-Directory.startCrawl(orphaned, 1);
-assert (Directory.noteCrawlPage(orphaned, alice, 0, [principalOf(71)], 9, self, 2) == 1);
-assert (Directory.noteCrawlPage(orphaned, bob, 0, [principalOf(72)], 9, self, 2) == 1);
-assert (Directory.crawlTargets(orphaned, 8).size() == 4);
-assert (Directory.remove(orphaned, alice));
-assert (Directory.setIgnored(orphaned, bob, true));
-for (target in Directory.crawlTargets(orphaned, 8).values()) {
-    assert (target.canister != alice);
-    assert (target.canister != bob);
-};
-assert (Directory.crawlProgress(orphaned).remaining == 2);
 
 // --- The seeded designer -----------------------------------------------------
 
