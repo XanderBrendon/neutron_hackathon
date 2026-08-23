@@ -16,11 +16,18 @@
 
 import { Actor, HttpAgent } from "@dfinity/agent";
 import { IDL } from "@dfinity/candid";
+import { icHost } from "neutron-tools/src/runtime.js";
 import { decodeCatalogReply, type PeerDesign } from "../wire.ts";
 
 const PHYSICAL_METHOD = "app_chipswap__chipswap_v1_query";
 const ROUTE_ID = "catalog";
-const MAINNET_GATEWAY = "https://icp0.io";
+/**
+ * The gateway every other Neutron surface queries through, and the one the
+ * background's connect-src names. Spelling it here instead of importing it
+ * once cost a release: `https://icp0.io` is a different origin, and the
+ * policy refused it.
+ */
+export const MAINNET_GATEWAY = icHost();
 
 const IngressRequest = IDL.Record({
   method: IDL.Text,

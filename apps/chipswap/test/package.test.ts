@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 116,
+    version: 117,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -350,7 +350,7 @@ test("the removed catalog methods are gone from every surface", async () => {
 
 test("the manifest and memory versions advanced together", async () => {
   const manifest = await readManifest();
-  expect(manifest.version).toBe(116);
+  expect(manifest.version).toBe(117);
   expect(manifest.memory?.chipswap?.version).toBe(6);
 });
 
@@ -363,7 +363,9 @@ test("the background ships with a policy that reaches the IC and nothing else", 
   // The background needs the gateway; it needs nothing else, and saying so in
   // the document is what keeps a bundled dependency from reaching further.
   expect(html).toContain("default-src 'none'");
-  expect(html).toContain("connect-src 'self' https://*.icp0.io");
+  expect(html).toContain("connect-src 'self' https://icp-api.io");
+  // The gateway is one origin, not every canister subdomain on it.
+  expect(html).not.toContain("*.icp0.io");
   expect(html).toContain("./service.js");
   // A wildcard host or an inline script would defeat the point.
   expect(html).not.toMatch(/connect-src[^;]*\s\*/u);
