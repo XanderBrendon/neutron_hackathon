@@ -81,12 +81,21 @@ export type Status = {
   directoryCount: number;
   incomingPending: number;
   outgoingActive: number;
-  crawl: CrawlProgress;
   shapeId: string;
   pixelCount: number;
   rowWidths: number[];
   paletteLimit: number;
   contactsAvailable: boolean;
+};
+
+// What became of a crawl's finds. `added + skipped` is the size of the batch
+// that was offered, so the tile can tell the owner the outcome of every
+// designer it found rather than reporting the ones the table had no room for.
+export type FoundSummary = {
+  added: number;
+  skipped: number;
+  full: boolean;
+  revision: number;
 };
 
 export type DirectoryEntry = {
@@ -101,16 +110,6 @@ export type DirectoryEntry = {
   contactName: string | null;
 };
 
-// `remaining` counts designers this crawl has still to ask, so the tile can say
-// how much is left rather than only how much is done. `full` says the directory
-// hit its ceiling and further discoveries are being dropped.
-export type CrawlProgress = {
-  active: boolean;
-  queried: number;
-  discovered: number;
-  remaining: number;
-  full: boolean;
-};
 
 export type IncomingTrade = {
   requestId: string;
@@ -355,7 +354,6 @@ export function parseStatus(value: unknown): Status {
     directoryCount: natNumber(source.directory_count, "directory count"),
     incomingPending: natNumber(source.incoming_pending, "incoming pending"),
     outgoingActive: natNumber(source.outgoing_active, "outgoing active"),
-    crawl: parseCrawlProgress(source.crawl),
     shapeId: text(source.shape_id, "shape id"),
     pixelCount: natNumber(source.pixel_count, "pixel count"),
     rowWidths: rowWidths.map((entry) => natNumber(entry, "row width")),
@@ -376,17 +374,6 @@ export function parseDirectoryEntry(value: unknown): DirectoryEntry {
     strikes: natNumber(source.strikes, "strike count"),
     ownsChip: bool(source.owns_chip, "ownership flag"),
     contactName: optionalText(source.contact_name, "contact name"),
-  };
-}
-
-export function parseCrawlProgress(value: unknown): CrawlProgress {
-  const source = record(value, "crawl progress");
-  return {
-    active: bool(source.active, "crawl activity"),
-    queried: natNumber(source.queried, "queried count"),
-    discovered: natNumber(source.discovered, "discovered count"),
-    remaining: natNumber(source.remaining, "remaining count"),
-    full: bool(source.full, "directory full flag"),
   };
 }
 
@@ -735,25 +722,32 @@ export async function forgetTrade(requestId: string): Promise<number> {
   );
 }
 
-// A crawl runs in rounds the tile drives, so that a long one shows its progress
-// and can be stopped. Starting clears any earlier crawl: one that finished has
-// visited everyone, and continuing it would do nothing.
-export async function startCrawl(): Promise<CrawlProgress> {
-  return parseCrawlProgress(
-    unwrap(await updateSelf("chipswap_crawl_start", NO_ARGUMENT), "crawl start"),
+// What a crawl found, handed to the backend at the end of it.
+//
+// The crawl itself is the background's (src/resident/crawl_run.ts); this is
+// only the one call it makes when the walk is over. `added` is what the
+// directory actually gained, which is not always what was found: the table has
+// a ceiling, and a crawl is not allowed to evict its way past it.
+export async function noteFoundDesigners(
+  canisters: string[],
+): Promise<FoundSummary> {
+  const value = unwrap(
+    await updateSelf("chipswap_directory_note_found", [
+      { canisters },
+    ] as unknown as JsonValue[]),
+    "found designers",
   );
+  return parseFoundSummary(value);
 }
 
-export async function crawlStep(): Promise<CrawlProgress> {
-  return parseCrawlProgress(
-    unwrap(await updateSelf("chipswap_crawl_step", NO_ARGUMENT), "crawl step"),
-  );
-}
-
-export async function stopCrawl(): Promise<CrawlProgress> {
-  return parseCrawlProgress(
-    unwrap(await updateSelf("chipswap_crawl_stop", NO_ARGUMENT), "crawl stop"),
-  );
+export function parseFoundSummary(value: unknown): FoundSummary {
+  const source = record(value, "found summary");
+  return {
+    added: natNumber(source.added, "added count"),
+    skipped: natNumber(source.skipped, "skipped count"),
+    full: bool(source.full, "directory full flag"),
+    revision: natNumber(source.revision, "revision"),
+  };
 }
 
 export async function proposeTrade(input: {

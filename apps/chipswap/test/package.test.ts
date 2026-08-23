@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 118,
+    version: 119,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -64,7 +64,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     // field is.
     memory: {
       chipswap: {
-        version: 6,
+        version: 7,
         schemas: {
           1: { src: "memory/chipswap/v1.mo" },
           2: { src: "memory/chipswap/v2.mo" },
@@ -72,6 +72,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
           4: { src: "memory/chipswap/v4.mo" },
           5: { src: "memory/chipswap/v5.mo" },
           6: { src: "memory/chipswap/v6.mo" },
+          7: { src: "memory/chipswap/v7.mo" },
         },
         migrations: [
           { from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" },
@@ -79,6 +80,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
           { from: 3, to: 4, src: "memory/chipswap/v3_to_v4.mo" },
           { from: 4, to: 5, src: "memory/chipswap/v4_to_v5.mo" },
           { from: 5, to: 6, src: "memory/chipswap/v5_to_v6.mo" },
+          { from: 6, to: 7, src: "memory/chipswap/v6_to_v7.mo" },
         ],
       },
     },
@@ -92,11 +94,10 @@ test("chipswap declares three paid routes and two free ones", async () => {
   expect(manifest.capabilities?.public_ingress).toMatchObject({
     api: 1,
     routes: [
-      // Reading a catalog is a query for the same reason crawling is: it
-      // writes nothing and records nothing about who asked, so it charges
-      // nothing either. It admits any caller because the browser reads it
-      // directly now, and a tile is credentialless — its query is anonymous or
-      // it does not happen.
+      // Reading a catalog is a query: it writes nothing and records nothing
+      // about who asked, so it charges nothing either. It admits any caller
+      // because the browser reads it directly now, and a tile is
+      // credentialless — its query is anonymous or it does not happen.
       {
         protocol: "chipswap_v1",
         id: "catalog",
@@ -134,13 +135,15 @@ test("chipswap declares three paid routes and two free ones", async () => {
       },
       // The crawl's route is a query: it reads, it cannot write, and so it
       // declares no cycles floor and no rate limit. A peer's crawl costs us
-      // nothing and tells us nothing, which is the trade it makes.
+      // nothing and tells us nothing, which is the trade it makes. It admits
+      // any caller because a crawl is a browser now, and a browser's query is
+      // anonymous or it does not happen.
       {
         protocol: "chipswap_v1",
         id: "directory",
         handler: "chipswap_directory_v1",
         mode: "query",
-        caller: "canister",
+        caller: "any",
         max_request_bytes: 1024,
         max_response_bytes: 8192,
       },
@@ -305,11 +308,15 @@ test("the catalog route admits a browser and the paid routes stay paid", async (
   expect(catalog).toMatchObject({ mode: "query", caller: "any" });
   expect(catalog).not.toHaveProperty("required_cycles");
 
-  // Widening one query route is not a licence to widen the rest. The directory
-  // route still serves canisters, and the three update routes still cost a
-  // caller cycles.
+  // The crawl runs in the browser now, so the directory route has to answer an
+  // anonymous query too. It is free for the same reason the catalog route is:
+  // it writes nothing and learns nothing about who asked.
   const directory = all.find((route) => route.id === "directory");
-  expect(directory).toMatchObject({ mode: "query", caller: "canister" });
+  expect(directory).toMatchObject({ mode: "query", caller: "any" });
+  expect(directory).not.toHaveProperty("required_cycles");
+
+  // Widening the two query routes is not a licence to widen the rest: the
+  // three update routes still cost a caller cycles.
 
   for (const id of ["trade", "deliver", "status"]) {
     const route = all.find((entry) => entry.id === id);
@@ -350,8 +357,8 @@ test("the removed catalog methods are gone from every surface", async () => {
 
 test("the manifest and memory versions advanced together", async () => {
   const manifest = await readManifest();
-  expect(manifest.version).toBe(118);
-  expect(manifest.memory?.chipswap?.version).toBe(6);
+  expect(manifest.version).toBe(119);
+  expect(manifest.memory?.chipswap?.version).toBe(7);
 });
 
 test("the background ships with a policy that reaches the IC and nothing else", async () => {
@@ -379,11 +386,60 @@ test("peer fetching lives in the background, not in the tile", async () => {
     "utf8",
   );
 
-  // The background is the only surface with persistence, so it is the only one
-  // that should be talking to peers. A tile that also fetched would be a
-  // second, cacheless path to the same data.
+  // The background is the only surface with persistence and the only one whose
+  // CSP names a gateway, so it is the only one that should be talking to peers.
+  // A tile that also fetched would be a second, cacheless path to the same
+  // data — and, since the crawl moved, a second path that could not reach the
+  // network at all.
   expect(background).toContain("app_chipswap__chipswap_v1_query");
   expect(background).toContain("fetchRootKey");
   expect(tile).not.toContain("app_chipswap__chipswap_v1_query");
   expect(tile).not.toContain("fetchRootKey");
+});
+
+test("the crawl runs in the background and is driven from the tile", async () => {
+  const tile = await readFile(jsUrl, "utf8");
+  const background = await readFile(
+    new URL("../dist/web/service.js", import.meta.url),
+    "utf8",
+  );
+
+  // The walk and the peer queries it makes are the background's.
+  expect(background).toContain("chipswap_crawl_start");
+  expect(background).toContain("chipswap_crawl_stop");
+  expect(background).toContain("chipswap_crawl_progress");
+  expect(background).toContain("chipswap_directory_note_found");
+
+  // The tile calls those three tools by name and does nothing else about a
+  // crawl. It must not carry the directory route id, because a tile that
+  // queried a peer directly would be reaching a host its document forbids.
+  expect(tile).toContain("chipswap_crawl_start");
+  expect(tile).toContain("chipswap_crawl_progress");
+  expect(tile).not.toContain("chipswap_directory_v1");
+});
+
+test("no crawl state survives in the canister", async () => {
+  const manifest = await readManifest();
+  const backend = await readFile(
+    new URL("../backend/main.mo", import.meta.url),
+    "utf8",
+  );
+  const schema = await readFile(
+    new URL("../backend/memory/chipswap/v7.mo", import.meta.url),
+    "utf8",
+  );
+
+  // The three methods that drove a crawl are gone from the surface entirely,
+  // rather than left declared and unused.
+  const methods = Object.keys(manifest.func ?? {});
+  expect(methods.filter((name) => name.startsWith("chipswap_crawl_"))).toEqual([]);
+  const preapproved =
+    manifest.capabilities?.preapproved_self_calls?.methods ?? [];
+  expect(preapproved.filter((name: string) => name.includes("crawl"))).toEqual([]);
+  expect(preapproved).toContain("chipswap_directory_note_found");
+
+  expect(backend).not.toContain("chipswap_crawl_step");
+  // The schema keeps designers, not walks.
+  expect(schema).not.toContain("public type Crawl");
+  expect(schema).toContain("directory : Map.Map<Principal, DirectoryEntry>");
 });

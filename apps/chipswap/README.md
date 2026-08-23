@@ -76,15 +76,34 @@ applied to one you have already made your own.
 
 **Finding more designers.** *Find more designers* asks every designer you know
 for their directory, a page at a time, then asks whoever that turns up, until
-there is nobody left to ask. It runs in rounds so a long crawl shows what it has
-done and what it has left, and can be stopped. The route it calls is a query: it
-reads, it cannot write, and so a crawl costs the peer nothing, is exempt from
-their paid-route rate limits, and leaves no trace — they never learn who was
-looking.
+there is nobody left to ask. The route it calls is a query: it reads, it cannot
+write, and so a crawl costs the peer nothing, is exempt from their paid-route
+rate limits, and leaves no trace — they never learn who was looking.
+
+The walk runs in your browser, not in your canister. It asks the peers directly,
+anonymously, and keeps everything about its own progress in memory that dies
+with the process: how far it has got, which peers are part-read, which are
+finished. Your canister hears about it once, at the end — a single call carrying
+the designers that were found, sent whether the crawl completed, you stopped it,
+or it failed part-way. That is the whole of what a crawl is worth keeping, and
+the rest was costing you an inter-canister call per peer for data anyone can
+read for free.
+
+Because the walk is a browser now, a peer still on an older release refuses the
+query outright — they only opened that route to canisters. Those are counted and
+named when the crawl ends, so a thin result says *why* it was thin rather than
+implying an empty network. They are never marked retired for it: not having
+upgraded is not the same as being gone.
+
+Your directory holds 512 designers. A crawl fills the seats that are free and
+never evicts to make more, so the number it reports as added is the number your
+directory actually gained — if it found forty and could seat twelve, it says
+so.
 
 **Ignoring a designer.** Ignoring is not forgetting. A forgotten designer comes
 straight back the next time a crawl finds them, with no memory of having been
-turned away; an ignored one stays in your list saying so. While a designer is
+turned away; an ignored one stays in your list saying so, and the crawl is told
+to leave them out of both the walk and what it brings home. While a designer is
 ignored their catalog is never fetched, the copy this machine already had is
 dropped, and you stop handing their address to peers who crawl you. Un-ignoring
 restores the entry, not the catalog: nothing of theirs reappears until the next
@@ -209,7 +228,7 @@ backend/
   Shape.mo          chip geometry and art validation
   Designs.mo        the ten slots: draft, save, publish, mint
   Holdings.mo       chips held, escrowed, or uncertain
-  Directory.mo      designers and the crawl
+  Directory.mo      designers, and what a crawl brings back
   Requirements.mo   measuring an offer against a design's requirements
   Trades.mo         the trade state machine
   Wire.mo           the CSW1 peer reply format
@@ -228,20 +247,23 @@ src/
   requirements.ts   what a design asks of an offered chip
   market_filter.ts  the market's filter axes and how they are named
   market_page.ts    the market page, joined and filtered in the tile
-  wire.ts           the CSW1 catalog reader, mirroring Wire.mo
-  catalog_client.ts the tile's side of the background's three tools
+  wire.ts           the CSW1 catalog and directory readers, mirroring Wire.mo
+  catalog_client.ts the tile's side of the background's catalog tools
+  crawl_client.ts   the tile's side of the background's crawl tools
   api.ts            typed self calls and payload parsers
   resident/
-    service.ts      the background: exposes the three catalog tools
-    agent.ts        one anonymous query to a peer's catalog route
+    service.ts      the background: exposes the catalog and crawl tools
+    agent.ts        anonymous queries to a peer's catalog and directory
     store.ts        the IndexedDB catalog cache
     freshness.ts    which designers are worth asking again
+    crawl.ts        the walk: frontier, cursors, and what may be adopted
+    crawl_run.ts    rounds of peer queries, then one commit to the backend
   views/            studio, collection, market, trades, directory
 ```
 
-The `catalog` route admits any caller, because a tile is credentialless and
-never holds the owner's identity — a browser-originated query is anonymous or
-it does not happen. Replies are signature-verified against the IC root key, but
+The `catalog` and `directory` routes admit any caller, because a tile is
+credentialless and never holds the owner's identity — a browser-originated query
+is anonymous or it does not happen. Replies are signature-verified against the IC root key, but
 they are not certified state, so nothing read this way is trusted enough to
 spend a chip on: `chipswap_trade_propose` re-asks the peer through the backend
 before it mints or escrows anything.

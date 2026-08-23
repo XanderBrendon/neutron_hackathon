@@ -1,9 +1,8 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { cx } from "neutron-design-system";
-import { copyToClipboard } from "neutron-tools/app";
+import { copyToClipboard, onAppStateChange } from "neutron-tools/app";
 import {
   addDirectoryEntry,
-  crawlStep,
   errorMessage,
   formatMsTimestamp,
   loadDirectory,
@@ -12,13 +11,16 @@ import {
   setDirectoryIgnored,
   setDirectoryRetired,
   shortPrincipal,
-  startCrawl,
-  stopCrawl,
-  type CrawlProgress,
   type DirectoryEntry,
   type Status,
   type Suggestion,
 } from "../api.ts";
+import {
+  crawlProgress,
+  startCrawl,
+  stopCrawl,
+  type CrawlProgress,
+} from "../crawl_client.ts";
 import {
   evictCatalogs,
   loadCachedCatalogs,
@@ -46,6 +48,49 @@ function lastFetchOf(cached: CachedCatalog | undefined): string {
   return cached.lastError === null ? when : `${when} (didn't answer since)`;
 }
 
+function plural(count: number, noun: string): string {
+  return `${count} ${noun}${count === 1 ? "" : "s"}`;
+}
+
+/**
+ * What a finished crawl actually did, in the owner's terms.
+ *
+ * `found` and `added` are different numbers and the difference matters: the
+ * directory has a ceiling, and a crawl is not allowed to evict its way past
+ * it. Reporting the finds alone would name designers the owner does not have.
+ *
+ * `outdated` is the other thing the old message could not say. After the
+ * directory route opened to browsers, a peer on an older release refuses the
+ * query outright — so an owner whose crawl comes back empty deserves to be
+ * told it was a version gap rather than an empty network.
+ */
+function describeOutcome(progress: CrawlProgress): string {
+  if (progress.error !== null && !progress.committed) {
+    return `The crawl stopped: ${progress.error}. Nothing was saved.`;
+  }
+
+  const asked = `Asked ${plural(progress.queried, "designer")}.`;
+  const gained =
+    progress.added === 0
+      ? "Nobody new."
+      : `Added ${plural(progress.added, "designer")}.`;
+  const parts = [asked, gained];
+
+  if (progress.added < progress.found) {
+    parts.push(
+      `${plural(progress.found - progress.added, "other")} could not be added.`,
+    );
+  }
+  if (progress.full) parts.push("Your directory is full.");
+  if (progress.outdated > 0) {
+    parts.push(
+      `${plural(progress.outdated, "designer")} are on an older release and could not be asked.`,
+    );
+  }
+  if (progress.error !== null) parts.push(`The crawl ended early: ${progress.error}.`);
+  return parts.join(" ");
+}
+
 type Props = {
   status: Status | null;
   onChanged: () => void | Promise<void>;
@@ -62,10 +107,10 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
   const [failure, setFailure] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // What the background says about the crawl. The tile drives it and draws it,
+  // but does not run it: the walk outlives this component, so its state cannot
+  // live in this component's memory.
   const [crawl, setCrawl] = useState<CrawlProgress | null>(null);
-  // A ref rather than state: the loop below reads it between rounds, and a
-  // state update would not be visible to a closure already running.
-  const stopping = useRef(false);
 
   // What this machine has fetched. The canister stopped counting designs when
   // it stopped storing them, so the two right-hand columns are answered from
@@ -132,62 +177,66 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
     }
   };
 
-  // The crawl runs in rounds so a long one shows its progress and can be
-  // stopped. Each round is one call that asks up to eight designers for a page
-  // of their directory; the loop ends when nothing is left to ask.
-  const runCrawl = async (resume: boolean) => {
-    setBusy(true);
+  // The crawl belongs to the background, so the tile's job is to ask for one,
+  // ask it to stop, and show what it says. Progress arrives on an app-state
+  // nudge after each round rather than by polling on a timer.
+  const readCrawl = useCallback(async () => {
+    try {
+      const progress = await crawlProgress();
+      setCrawl(progress.active ? progress : null);
+      return progress;
+    } catch (error) {
+      setFailure(errorMessage(error));
+      return null;
+    }
+  }, []);
+
+  // A crawl this tile did not start is still this owner's crawl. Reopening the
+  // Directory during one picks it up rather than showing an idle button.
+  useEffect(() => {
+    void readCrawl();
+    const stop = onAppStateChange("crawl", () => {
+      void (async () => {
+        const progress = await readCrawl();
+        if (progress !== null && !progress.active) {
+          setMessage(describeOutcome(progress));
+          await reload(offset);
+          await onChanged();
+        }
+      })();
+    });
+    return stop;
+    // `offset` is read inside the listener rather than depended on: resubscribing
+    // on every page turn would drop a nudge that arrived mid-swap.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [readCrawl]);
+
+  const beginCrawl = async () => {
     setFailure(null);
     setMessage(null);
-    stopping.current = false;
     try {
-      // Resuming skips the reset, so a crawl interrupted by a closed tile
-      // carries on from the designers it had already visited rather than
-      // spending another round on all of them.
-      let progress = resume ? await crawlStep() : await startCrawl();
-      setCrawl(progress);
-      while (!stopping.current && progress.remaining > 0) {
-        progress = await crawlStep();
-        setCrawl(progress);
-        await reload(offset);
-      }
-      if (stopping.current) {
-        await stopCrawl();
-        setCrawl(null);
-        setMessage(
-          `Stopped after ${progress.queried} designer${progress.queried === 1 ? "" : "s"}, ` +
-            `${progress.discovered} new.`,
-        );
-      } else {
-        await stopCrawl();
-        setCrawl(null);
-        setMessage(
-          progress.discovered === 0
-            ? `Asked ${progress.queried} designer${progress.queried === 1 ? "" : "s"}. Nobody new.` +
-              (progress.full ? " Your directory is full." : "")
-            : `Found ${progress.discovered} new designer${progress.discovered === 1 ? "" : "s"} ` +
-              `from ${progress.queried}.` +
-              (progress.full ? " Your directory is now full." : ""),
-        );
-      }
+      setCrawl(await startCrawl());
+    } catch (error) {
+      setFailure(errorMessage(error));
+    }
+  };
+
+  const endCrawl = async () => {
+    try {
+      // Stopping resolves only once the finds are committed, so the message
+      // below describes a directory that has already changed.
+      const outcome = await stopCrawl();
+      setCrawl(null);
+      setMessage(describeOutcome(outcome));
       await reload(offset);
       await onChanged();
     } catch (error) {
       setFailure(errorMessage(error));
       setCrawl(null);
-    } finally {
-      stopping.current = false;
-      setBusy(false);
     }
   };
 
-  const crawling = crawl !== null;
-  // State left by a crawl this tile is not currently driving: the owner closed
-  // the tile, or reloaded, while one was part-way through.
-  const interrupted =
-    !crawling && status?.crawl.active && status.crawl.remaining > 0
-      ? status.crawl
-      : null;
+  const crawling = crawl !== null && crawl.active;
 
   return (
     <section className="chipswap-directory">
@@ -312,8 +361,8 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
         <div className="nt-cluster">
           <button
             className="nt-button nt-button--sm"
-            disabled={busy || total === 0}
-            onClick={() => void runCrawl(false)}
+            disabled={busy || crawling || total === 0}
+            onClick={() => void beginCrawl()}
             type="button"
           >
             Find more designers
@@ -321,9 +370,7 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
           {crawling ? (
             <button
               className="nt-button nt-button--secondary nt-button--sm"
-              onClick={() => {
-                stopping.current = true;
-              }}
+              onClick={() => void endCrawl()}
               type="button"
             >
               Stop
@@ -331,25 +378,11 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
           ) : null}
           {crawl ? (
             <span className="nt-meta" data-tid="chipswap-crawl-progress">
-              asked {crawl.queried} · {crawl.remaining} to go ·{" "}
-              {crawl.discovered} new
+              asked {crawl.queried} · {crawl.remaining} to go · {crawl.found}{" "}
+              new
             </span>
           ) : null}
         </div>
-        {interrupted ? (
-          <p className="nt-callout">
-            A crawl was left part-finished, with {interrupted.remaining} designer
-            {interrupted.remaining === 1 ? "" : "s"} still to ask.{" "}
-            <button
-              className="nt-button nt-button--sm"
-              disabled={busy}
-              onClick={() => void runCrawl(true)}
-              type="button"
-            >
-              Carry on
-            </button>
-          </p>
-        ) : null}
         {total === 0 ? (
           <p className="nt-muted">
             Add one designer first. A crawl walks out from the ones you already

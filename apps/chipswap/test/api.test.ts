@@ -8,9 +8,9 @@ import {
   nsText,
   parseArt,
   parseChip,
-  parseCrawlProgress,
   parseDesign,
   parseDirectoryEntry,
+  parseFoundSummary,
   parseIncomingTrade,
   parseOutgoingTrade,
   parseStatus,
@@ -207,13 +207,6 @@ test("status reports the geometry the editor draws with", () => {
     catalog_designers: "2",
     incoming_pending: "1",
     outgoing_active: "0",
-    crawl: {
-      active: true,
-      queried: "4",
-      discovered: "6",
-      remaining: "11",
-      full: false,
-    },
     shape_id: "circle31",
     pixel_count: "757",
     row_widths: ["9", "13"],
@@ -225,34 +218,10 @@ test("status reports the geometry the editor draws with", () => {
   expect(status.pixelCount).toBe(757);
   expect(status.rowWidths).toEqual([9, 13]);
   expect(status.contactsAvailable).toBe(true);
-  // A crawl interrupted by a closed tile is reported as resumable, so the tile
-  // can offer to carry on rather than silently starting over.
-  expect(status.crawl.active).toBe(true);
-  expect(status.crawl.remaining).toBe(11);
-  expect(status.crawl.discovered).toBe(6);
-  expect(status.crawl.full).toBe(false);
-});
-
-test("crawl progress counts what is left, not only what is done", () => {
-  const idle = parseCrawlProgress({
-    active: false,
-    queried: "0",
-    discovered: "0",
-    remaining: "0",
-    full: true,
-  });
-  expect(idle.active).toBe(false);
-  expect(idle.full).toBe(true);
-
-  expect(() =>
-    parseCrawlProgress({
-      active: true,
-      queried: "1",
-      discovered: "0",
-      remaining: "-2",
-      full: false,
-    }),
-  ).toThrow();
+  // Status says nothing about a crawl any more. The walk lives in the browser,
+  // so the only thing that knows whether one is running is the background, and
+  // a field here would be a second answer that could disagree with it.
+  expect(status).not.toHaveProperty("crawl");
 });
 
 test("a directory entry carries the flags the market and the crawl read", () => {
@@ -336,4 +305,26 @@ test("display helpers stay readable", () => {
   expect(formatTimestamp("not a number")).toBe("unknown");
   expect(shortPrincipal("aaaaa-aa")).toBe("aaaaa-aa");
   expect(shortPrincipal("rrkah-fqaaa-aaaaa-aaaaq-cai")).toContain("…");
+});
+
+test("a crawl's outcome separates what was found from what was seated", () => {
+  const summary = parseFoundSummary({
+    added: "12",
+    skipped: "28",
+    full: true,
+    revision: "91",
+  });
+
+  // Forty found, twelve seated. The tile has to be able to say that, because
+  // the table has a ceiling and a crawl may not evict its way past it.
+  expect(summary.added).toBe(12);
+  expect(summary.skipped).toBe(28);
+  expect(summary.full).toBe(true);
+  expect(summary.revision).toBe(91);
+});
+
+test("a nonsense count is refused rather than rendered", () => {
+  expect(() =>
+    parseFoundSummary({ added: "-1", skipped: "0", full: false, revision: "1" }),
+  ).toThrow();
 });

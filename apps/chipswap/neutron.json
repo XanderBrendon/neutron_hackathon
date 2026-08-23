@@ -2,7 +2,7 @@
   "format": 3,
   "name": "Chipswap",
   "id": "chipswap",
-  "version": 117,
+  "version": 119,
   "update_source": "233tv-xiaaa-aaaay-aacta-cai",
   "description": "Design, publish, and trade pixel chips between Neutron canisters",
   "src": "main.mo",
@@ -220,10 +220,6 @@
       "type": "update",
       "async": false
     },
-    "chipswap_directory_note_found": {
-      "type": "update",
-      "async": false
-    },
     "chipswap_brush_save": {
       "type": "update",
       "async": false
@@ -233,6 +229,10 @@
       "async": false
     },
     "chipswap_trade_forget": {
+      "type": "update",
+      "async": false
+    },
+    "chipswap_directory_note_found": {
       "type": "update",
       "async": false
     },
