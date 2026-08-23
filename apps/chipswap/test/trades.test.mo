@@ -8,7 +8,7 @@ import Text "mo:core/Text";
 import Designs "../backend/Designs";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v5";
+import Memory "../backend/memory/chipswap/v6";
 import Shape "../backend/Shape";
 import Trades "../backend/Trades";
 import Wire "../backend/Wire";
@@ -405,20 +405,6 @@ switch (Designs.publish(proposer, 1, 1, OPEN, false, 20)) {
     case (#ok(())) {};
     case (#err(code)) Runtime.trap(code);
 };
-Directory.storeCatalog(
-    proposer,
-    alice,
-    [{
-        design_id = 1;
-        title = "Alice chip";
-        art;
-        requirements = OPEN;
-        nsfw = false;
-        design_revision = 1;
-        published_at_ns = 5;
-    }],
-    30,
-);
 switch (Holdings.admit(proposer, Trades.chipFromWire(offeredChip(carol, 5, 1), 40))) {
     case (#ok(())) {};
     case (#err(code)) Runtime.trap(code);
@@ -470,16 +456,9 @@ assert (
         Trades.beginPropose(proposer, { peer = bob; want_design_id = 1; offer = #own(1) }, bob, 130)
     ) == "self_trade"
 );
-assert (
-    expectErr(
-        Trades.beginPropose(proposer, { peer = alice; want_design_id = 8; offer = #own(1) }, bob, 140)
-    ) == "unknown_design"
-);
-assert (
-    expectErr(
-        Trades.beginPropose(proposer, { peer = carol; want_design_id = 1; offer = #own(1) }, bob, 150)
-    ) == "unknown_design"
-);
+// Whether the peer publishes the wanted design is no longer asked here. There
+// is no stored catalog to ask, so chipswap_trade_propose queries the peer
+// before calling in; test/main.test.mo covers both outcomes of that check.
 assert (
     expectErr(
         Trades.beginPropose(proposer, { peer = alice; want_design_id = 1; offer = #own(9) }, bob, 160)
@@ -665,20 +644,6 @@ switch (Designs.publish(outgoingBound, 1, 1, OPEN, false, 20)) {
     case (#ok(())) {};
     case (#err(code)) Runtime.trap(code);
 };
-Directory.storeCatalog(
-    outgoingBound,
-    alice,
-    [{
-        design_id = 1;
-        title = "Alice chip";
-        art;
-        requirements = OPEN;
-        nsfw = false;
-        design_revision = 1;
-        published_at_ns = 5;
-    }],
-    30,
-);
 var outgoing = 0;
 while (outgoing < Trades.MAX_OUTGOING) {
     ignore expectOk(

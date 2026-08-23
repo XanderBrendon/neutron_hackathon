@@ -100,7 +100,6 @@
         "chipswap_design",
         "chipswap_collection",
         "chipswap_directory",
-        "chipswap_store",
         "chipswap_trades",
         "chipswap_brushes",
         "chipswap_contacts_suggestions",
@@ -116,7 +115,6 @@
         "chipswap_brush_save",
         "chipswap_brush_delete",
         "chipswap_trade_forget",
-        "chipswap_fetch_catalogs",
         "chipswap_trade_propose",
         "chipswap_trade_resolve",
         "chipswap_trade_accept",
@@ -165,10 +163,6 @@
       "async": false
     },
     "chipswap_directory": {
-      "type": "query",
-      "async": false
-    },
-    "chipswap_store": {
       "type": "query",
       "async": false
     },
@@ -241,10 +235,6 @@
       "async": false
     },
     "chipswap_crawl_step": {
-      "type": "update",
-      "async": "async*"
-    },
-    "chipswap_fetch_catalogs": {
       "type": "update",
       "async": "async*"
     },

@@ -8,7 +8,7 @@ import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v5";
+import Memory "../backend/memory/chipswap/v6";
 import Shape "../backend/Shape";
 
 func principalOf(seed : Nat) : Principal {
@@ -42,31 +42,6 @@ let art : Memory.Art = {
     palette = [0x000000];
     pixels = Blob.fromArray(Array.tabulate<Nat8>(Shape.PIXEL_COUNT, func(_) { 0 }));
 };
-
-func cachedDesign(
-    id : Nat,
-    requirements : Memory.TradeRequirements,
-    nsfw : Bool,
-) : Memory.CachedDesign {
-    {
-        design_id = id;
-        title = "Design";
-        art;
-        requirements;
-        nsfw;
-        design_revision = 1;
-        published_at_ns = 5;
-    };
-};
-
-func titled(id : Nat, title : Text) : Memory.CachedDesign {
-    { cachedDesign(id, Memory.openRequirements(), false) with title };
-};
-
-let OPEN = Memory.openRequirements();
-let APPROVES = { OPEN with approval = true };
-// Restrictive without asking for approval: the two axes are independent.
-let PICKY = { OPEN with min_colors = ?6 };
 
 func chip(designer : Principal, designId : Nat, serial : Nat) : Memory.Chip {
     {
@@ -136,342 +111,12 @@ assert (Directory.get(evicting, bob) != null);
 assert (Directory.get(evicting, carol) != null);
 assert (Directory.ignored(evicting, carol));
 
-// Catalogs are cached per designer and evicted least-recently-fetched first.
-let store = blank();
-ignore Directory.note(store, alice, #manual, 1);
-ignore Directory.note(store, bob, #manual, 1);
-Directory.storeCatalog(store, alice, [cachedDesign(1, OPEN, false), cachedDesign(2, APPROVES, false)], 50);
-Directory.storeCatalog(store, bob, [cachedDesign(1, APPROVES, false)], 60);
-let ?aliceEntry = Directory.get(store, alice) else Runtime.trap("entry missing");
-assert (aliceEntry.design_count == 2);
-assert (aliceEntry.last_catalog_ns == ?50);
-
-var cacheSeed = 7000;
-while (Map.size(store.catalog_cache) < Directory.MAX_CATALOG_CACHE) {
-    let extra = principalOf(cacheSeed);
-    ignore Directory.note(store, extra, #crawl, 70);
-    Directory.storeCatalog(store, extra, [cachedDesign(1, OPEN, false)], 70 + cacheSeed);
-    cacheSeed += 1;
-};
-assert (Map.size(store.catalog_cache) == Directory.MAX_CATALOG_CACHE);
-Directory.storeCatalog(store, principalOf(cacheSeed), [cachedDesign(1, OPEN, false)], 99_999);
-assert (Map.size(store.catalog_cache) == Directory.MAX_CATALOG_CACHE);
-// Alice's was the oldest fetch, so it is the one that left.
-assert (Map.get(store.catalog_cache, Principal.compare, alice) == null);
-assert (Map.get(store.catalog_cache, Principal.compare, bob) != null);
-
-// --- Market rows ------------------------------------------------------------
-
-// The filter axes apply independently and together, and the page they produce
-// reports the filtered total rather than the cached one.
-let rows = blank();
-Directory.storeCatalog(
-    rows,
-    alice,
-    [cachedDesign(1, OPEN, false), cachedDesign(2, APPROVES, false)],
-    10,
-);
-Directory.storeCatalog(
-    rows,
-    bob,
-    [cachedDesign(1, PICKY, false), cachedDesign(2, OPEN, true)],
-    20,
-);
-switch (Holdings.admit(rows, chip(alice, 1, 1))) {
-    case (#ok(())) {};
-    case (#err(code)) Runtime.trap(code);
-};
-
-func filterOf(
-    ownership : Text,
-    nsfw : Text,
-    requirements : [Text],
-    designer : ?Principal,
-    search : Text,
-    sort : Text,
-) : Directory.StoreFilter {
-    { ownership; nsfw; requirements; designer; search; sort };
-};
-
-func plain(ownership : Text, nsfw : Text) : Directory.StoreFilter {
-    filterOf(ownership, nsfw, [], null, "", "designer");
-};
-
-func runQuery(ownership : Text, nsfw : Text) : Directory.StorePage {
-    Directory.storeRows(rows, plain(ownership, nsfw), 0, 50);
-};
-
-// One of the four is tagged, so a market that hides tags is three rows and
-// says so.
-assert (runQuery("all", "hide").total == 3);
-assert (runQuery("all", "hide").nsfw_hidden == 1);
-assert (runQuery("all", "show").total == 4);
-assert (runQuery("all", "show").nsfw_hidden == 0);
-
-assert (runQuery("owned", "show").total == 1);
-assert (runQuery("not_owned", "show").total == 3);
-
-// --- The requirement facets -------------------------------------------------
-
-func facets(list : [Text]) : Directory.StorePage {
-    Directory.storeRows(
-        rows,
-        filterOf("all", "show", list, null, "", "designer"),
-        0,
-        50,
-    );
-};
-
-// Two designs ask for nothing, one wants approval, one has a requirement about
-// the artwork. "Swaps freely" and "asks something of the artwork" are not
-// opposites, and a design that only wants approval is neither.
-assert (facets(["open"]).total == 2);
-assert (facets(["approval"]).total == 1);
-assert (facets(["min_colors"]).total == 1);
-assert (facets(["max_coverage"]).total == 0);
-assert (facets(["tag_rule"]).total == 0);
-
-// Facets widen each other: two ticked asks for the designs matching either.
-assert (facets(["open", "approval"]).total == 3);
-assert (facets(["open", "min_colors"]).total == 3);
-assert (facets(["open", "approval", "min_colors"]).total == 4);
-// Repeating one asks for no more than naming it once.
-assert (facets(["open", "open"]).total == 2);
-// None ticked is not a facet that matches nothing; it is no constraint at all.
-assert (facets([]).total == 4);
-
-// A facet narrows alongside the other axes rather than replacing them.
-assert (Directory.storeRows(rows, filterOf("all", "hide", ["open"], null, "", "designer"), 0, 50).total == 1);
-assert (Directory.storeRows(rows, filterOf("all", "hide", ["open"], null, "", "designer"), 0, 50).nsfw_hidden == 1);
-assert (Directory.storeRows(rows, filterOf("not_owned", "show", ["open"], null, "", "designer"), 0, 50).total == 1);
-
-// --- Trades I can make ------------------------------------------------------
-
-// The facet is answered by measuring what we could offer, not by trusting a
-// count: a chip claims nothing about its colors, its pixels are counted.
-let colorful : Memory.Art = {
-    shape_id = Shape.SHAPE_ID;
-    palette = [0x000000, 0x110000, 0x220000, 0x330000, 0x440000, 0x550000];
-    pixels = Blob.fromArray(
-        Array.tabulate<Nat8>(Shape.PIXEL_COUNT, func(i) { Nat8.fromNat(i % 6) })
-    );
-};
-
-func chipOf(designer : Principal, designId : Nat, art : Memory.Art, nsfw : Bool) : Memory.Chip {
-    {
-        ref = { designer; design_id = designId; serial = 1 };
-        title = "Chip";
-        art;
-        nsfw;
-        design_revision = 1;
-        minted_at_ns = 1;
-        acquired_at_ns = 1;
-        state = #held;
-    };
-};
-
-func ownDesign(id : Nat, art : Memory.Art, state : Memory.DesignState) : Memory.Design {
-    {
-        design_id = id;
-        title = "Mine";
-        art;
-        state;
-        requirements = OPEN;
-        nsfw = false;
-        revision = 1;
-        created_at_ns = 1;
-        published_at_ns = ?2;
-        next_serial = 1;
-    };
-};
-
-func tradeableIn(mem : Memory.Mem) : Nat {
-    Directory.storeRows(
-        mem,
-        filterOf("all", "show", ["tradeable"], null, "", "designer"),
-        0,
-        50,
-    ).total;
-};
-
-func seedCatalogs(mem : Memory.Mem) {
-    Directory.storeCatalog(mem, alice, [cachedDesign(1, OPEN, false), cachedDesign(2, APPROVES, false)], 10);
-    Directory.storeCatalog(mem, bob, [cachedDesign(1, PICKY, false)], 20);
-};
-
-// Nothing to offer means nothing is tradeable, however open the designs are.
-let empty = blank();
-seedCatalogs(empty);
-assert (Directory.storeRows(empty, plain("all", "show"), 0, 50).total == 3);
-assert (tradeableIn(empty) == 0);
-
-// A one-color chip satisfies the two that ask nothing of the artwork, and the
-// approval design among them: approval decides what happens to an offer that
-// already qualifies, not whether it qualifies.
-let plainChip = blank();
-seedCatalogs(plainChip);
-switch (Holdings.admit(plainChip, chipOf(carol, 9, art, false))) {
-    case (#ok(())) {};
-    case (#err(code)) Runtime.trap(code);
-};
-assert (tradeableIn(plainChip) == 2);
-
-// Six colors clears the six-color minimum, so the picky design joins them.
-let sixColors = blank();
-seedCatalogs(sixColors);
-switch (Holdings.admit(sixColors, chipOf(carol, 9, colorful, false))) {
-    case (#ok(())) {};
-    case (#err(code)) Runtime.trap(code);
-};
-assert (tradeableIn(sixColors) == 3);
-
-// A published design of our own counts too: offering one mints a fresh copy.
-let ownPublished = blank();
-seedCatalogs(ownPublished);
-Map.add(ownPublished.designs, Nat.compare, 1, ownDesign(1, colorful, #published));
-assert (tradeableIn(ownPublished) == 3);
-
-// A draft is not a candidate. It cannot be offered, so it must not make a
-// design look reachable that is not.
-let ownDraft = blank();
-seedCatalogs(ownDraft);
-Map.add(ownDraft.designs, Nat.compare, 1, ownDesign(1, colorful, #draft));
-assert (tradeableIn(ownDraft) == 0);
-
-// Neither is a chip already committed to a trade in flight.
-let escrowed = blank();
-seedCatalogs(escrowed);
-switch (Holdings.admit(escrowed, chipOf(carol, 9, colorful, false))) {
-    case (#ok(())) {};
-    case (#err(code)) Runtime.trap(code);
-};
-switch (Holdings.escrow(escrowed, Holdings.key({ designer = carol; design_id = 9; serial = 1 }), Blob.fromArray([1]), bob, 5)) {
-    case (#ok(_)) {};
-    case (#err(code)) Runtime.trap(code);
-};
-assert (tradeableIn(escrowed) == 0);
-
-// The tag rule is measured against the offered chip's own tag, so a tagged
-// chip cannot satisfy a design that refuses tagged ones.
-let refusesTagged = blank();
-Directory.storeCatalog(refusesTagged, alice, [cachedDesign(1, { OPEN with nsfw = ?#disallowed }, false)], 10);
-switch (Holdings.admit(refusesTagged, chipOf(carol, 9, colorful, true))) {
-    case (#ok(())) {};
-    case (#err(code)) Runtime.trap(code);
-};
-assert (tradeableIn(refusesTagged) == 0);
-switch (Holdings.admit(refusesTagged, chipOf(carol, 10, colorful, false))) {
-    case (#ok(())) {};
-    case (#err(code)) Runtime.trap(code);
-};
-assert (tradeableIn(refusesTagged) == 1);
-
-// --- Search, designer, and order --------------------------------------------
-
-let sorting = blank();
-Directory.storeCatalog(
-    sorting,
-    alice,
-    [titled(1, "Zebra"), titled(2, "Apple")],
-    10,
-);
-Directory.storeCatalog(sorting, bob, [titled(1, "Moon")], 20);
-
-func sorted(sort : Text) : [Text] {
-    Array.map<Directory.StoreRow, Text>(
-        Directory.storeRows(sorting, filterOf("all", "show", [], null, "", sort), 0, 50).rows,
-        func(row) { row.title },
-    );
-};
-
-// Ties inside one designer's catalog fall back to the design id, so a page
-// boundary lands in the same place every time it is asked for.
-assert (sorted("recent") == ["Moon", "Zebra", "Apple"]);
-assert (sorted("oldest") == ["Zebra", "Apple", "Moon"]);
-assert (sorted("title") == ["Apple", "Moon", "Zebra"]);
-assert (sorted("designer") == ["Zebra", "Apple", "Moon"]);
-
-func searched(needle : Text) : Nat {
-    Directory.storeRows(sorting, filterOf("all", "show", [], null, needle, "designer"), 0, 50).total;
-};
-
-assert (searched("") == 3);
-assert (searched("Moon") == 1);
-// Case is not a decision a reader made, so it is not one the search enforces.
-assert (searched("moon") == 1);
-assert (searched("MOON") == 1);
-// A substring matches, anchored nowhere in particular.
-assert (searched("oo") == 1);
-assert (searched("e") == 2);
-assert (searched("xyzzy") == 0);
-
-func fromDesigner(who : ?Principal) : Nat {
-    Directory.storeRows(sorting, filterOf("all", "show", [], who, "", "designer"), 0, 50).total;
-};
-
-assert (fromDesigner(null) == 3);
-assert (fromDesigner(?alice) == 2);
-assert (fromDesigner(?bob) == 1);
-// A designer with nothing cached is an empty shelf, not an unfiltered market.
-assert (fromDesigner(?carol) == 0);
-
-// --- Rows, paging, and validation -------------------------------------------
-
-// A row carries the whole policy, so the tile can pre-check an offer against it.
-let pickyRows = facets(["min_colors"]);
-assert (pickyRows.rows[0].requirements.min_colors == ?6);
-assert (not pickyRows.rows[0].nsfw);
-let taggedRows = facets(["open"]);
-assert (taggedRows.rows[1].nsfw);
-
-let ownedRows = runQuery("owned", "show");
-assert (ownedRows.rows[0].designer == alice);
-assert (ownedRows.rows[0].design_id == 1);
-assert (ownedRows.rows[0].owned);
-assert (ownedRows.rows[0].fetched_at_ns == 10);
-
-// Paging reports the filtered total, not the cached total.
-let paged = Directory.storeRows(
-    rows,
-    filterOf("all", "show", ["open"], null, "", "designer"),
-    1,
-    10,
-);
-assert (paged.total == 2);
-assert (paged.rows.size() == 1);
-
-// An unknown filter value is rejected rather than silently widened.
-assert (Directory.validFilter(plain("all", "hide")));
-assert (Directory.validFilter(filterOf("all", "show", ["open", "tradeable"], ?alice, "moon", "title")));
-assert (Directory.validFilter(plain("nope", "hide")) == false);
-assert (Directory.validFilter(plain("all", "nope")) == false);
-assert (Directory.validFilter(filterOf("all", "hide", ["nope"], null, "", "designer")) == false);
-assert (Directory.validFilter(filterOf("all", "hide", [], null, "", "nope")) == false);
-
-// A caller cannot buy unbounded work with a long list or a long search.
-func repeatA(count : Nat) : Text {
-    Text.join(Array.tabulate<Text>(count, func(_) { "a" }).values(), "");
-};
-assert (Directory.validFilter(filterOf("all", "hide", Array.tabulate<Text>(Directory.MAX_REQUIREMENT_FACETS, func(_) { "open" }), null, "", "designer")));
-assert (
-    Directory.validFilter(
-        filterOf("all", "hide", Array.tabulate<Text>(Directory.MAX_REQUIREMENT_FACETS + 1, func(_) { "open" }), null, "", "designer")
-    ) == false
-);
-assert (Directory.validFilter(filterOf("all", "hide", [], null, repeatA(Directory.MAX_SEARCH_CHARS), "designer")));
-assert (Directory.validFilter(filterOf("all", "hide", [], null, repeatA(Directory.MAX_SEARCH_CHARS + 1), "designer")) == false);
-
-
-// Ignoring reaches three places at once: what we fetch, what we pass on, and
-// what the store shows. The entry itself stays, which is the whole point.
+// Ignoring reaches two places at once now: what we crawl and what we pass on.
+// The entry itself stays, which is the whole point. What the market shows is no
+// longer this canister's business — the browser evicts its own copy.
 let ignoring = blank();
 ignore Directory.note(ignoring, alice, #manual, 10);
 ignore Directory.note(ignoring, bob, #manual, 20);
-Directory.storeCatalog(ignoring, alice, [cachedDesign(1, OPEN, false)], 30);
-Directory.storeCatalog(ignoring, bob, [cachedDesign(1, OPEN, false)], 40);
-
-let openFilter : Directory.StoreFilter = plain("all", "show");
-assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 2);
 assert (Directory.served(ignoring, self, 0, 10).total == 2);
 
 assert (Directory.setIgnored(ignoring, bob, true));
@@ -482,38 +127,16 @@ assert (Map.size(ignoring.directory) == 2);
 assert (Directory.note(ignoring, bob, #crawl, 50) == false);
 assert (Directory.ignored(ignoring, bob));
 
-// The cache went with the flag, so bob's row leaves the store rather than
-// sitting there growing stale behind a refresh that will never come.
-assert (Map.get(ignoring.catalog_cache, Principal.compare, bob) == null);
-assert (Map.get(ignoring.catalog_cache, Principal.compare, alice) != null);
-assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 1);
-assert (Directory.storeRows(ignoring, openFilter, 0, 50).rows[0].designer == alice);
-
 // And we stop handing bob to the peers who crawl us.
 let servedAfter = Directory.served(ignoring, self, 0, 10);
 assert (servedAfter.total == 1);
 assert (servedAfter.entries[0] == alice);
 
-// Un-ignoring restores the entry, not the catalog: the store stays quiet
-// until the next refresh actually fetches something.
+// Un-ignoring restores the entry to every outward path it left.
 assert (Directory.setIgnored(ignoring, bob, false));
 assert (Directory.ignored(ignoring, bob) == false);
-assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 1);
 assert (Directory.served(ignoring, self, 0, 10).total == 2);
-Directory.storeCatalog(ignoring, bob, [cachedDesign(1, OPEN, false)], 70);
-assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 2);
-
-// A catalog cached before the flag is set is still not shown, so the store
-// never depends on the cache having been cleared by exactly one code path.
-Directory.storeCatalog(ignoring, bob, [cachedDesign(1, OPEN, false)], 80);
-Map.add(
-    ignoring.directory,
-    Principal.compare,
-    bob,
-    { (switch (Directory.get(ignoring, bob)) { case (?e) e; case null Runtime.trap("missing") }) with ignored = true },
-);
-assert (Map.get(ignoring.catalog_cache, Principal.compare, bob) != null);
-assert (Directory.storeRows(ignoring, openFilter, 0, 50).total == 1);
+assert (Directory.reachable(ignoring, bob));
 
 // --- What a peer's crawl reads ---------------------------------------------
 
@@ -628,14 +251,13 @@ assert (Directory.retired(outcomes, bob));
 assert (Directory.get(strikes, alice) != null);
 assert (Directory.served(strikes, self, 0, 10).total == 0);
 
-// Retiring drops the cached catalog, so the store does not keep showing chips
-// from a designer nobody will ever refresh again.
+// Retiring closes the same outward paths ignoring does, and for the same
+// reason: we will not spend another call on this designer.
 ignore Directory.note(strikes, bob, #manual, 1);
-Directory.storeCatalog(strikes, bob, [cachedDesign(1, OPEN, false)], 10);
-assert (Map.get(strikes.catalog_cache, Principal.compare, bob) != null);
+assert (Directory.reachable(strikes, bob));
 assert (Directory.setRetired(strikes, bob, true));
-assert (Map.get(strikes.catalog_cache, Principal.compare, bob) == null);
-assert (Directory.storeRows(strikes, openFilter, 0, 50).total == 0);
+assert (Directory.reachable(strikes, bob) == false);
+assert (Directory.served(strikes, self, 0, 10).total == 0);
 
 // A designer put back into rotation gets a full three chances again rather than
 // sitting one bad call away from retirement.

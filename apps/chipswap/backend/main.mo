@@ -13,7 +13,7 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v5";
+import Memory "./memory/chipswap/v6";
 import PrincipalText "./PrincipalText";
 import Requirements "./Requirements";
 import Shape "./Shape";
@@ -155,7 +155,6 @@ module {
         holdings : Nat;
         holdings_limit : Nat;
         directory_count : Nat;
-        catalog_designers : Nat;
         incoming_pending : Nat;
         outgoing_active : Nat;
         crawl : CrawlView;
@@ -179,8 +178,6 @@ module {
         ignored : Bool;
         retired : Bool;
         strikes : Nat;
-        last_catalog_ns : ?Int;
-        design_count : Nat;
         owns_chip : Bool;
         contact_name : ?Text;
     };
@@ -198,25 +195,6 @@ module {
     public type DirectoryPage = {
         entries : [DirectoryEntryView];
         total : Nat;
-    };
-
-    public type StoreRowView = {
-        designer : Text;
-        design_id : Nat;
-        title : Text;
-        art : ArtView;
-        requirements : RequirementsView;
-        nsfw : Bool;
-        design_revision : Nat;
-        owned : Bool;
-        fetched_at_ns : Int;
-        contact_name : ?Text;
-    };
-
-    public type StorePage = {
-        rows : [StoreRowView];
-        total : Nat;
-        nsfw_hidden : Nat;
     };
 
     public type IncomingTradeView = {
@@ -289,11 +267,6 @@ module {
         #err : Err;
     };
 
-    public type FetchCatalogsResult = {
-        #ok : { fetched : [Text]; failed : [Text]; revision : Nat };
-        #err : Err;
-    };
-
     public type CrawlResult = {
         #ok : CrawlView;
         #err : Err;
@@ -345,20 +318,6 @@ module {
 
     public type RetireRequest = { canister : Text; retired : Bool };
 
-    // `designer` is a principal as text, and empty means every designer. It
-    // crosses as text rather than a principal because the tile reads it out of
-    // a select whose empty option is a string like every other option.
-    public type StoreRequest = {
-        ownership : Text;
-        nsfw : Text;
-        requirements : [Text];
-        designer : Text;
-        search : Text;
-        sort : Text;
-        offset : Nat;
-        limit : Nat;
-    };
-
     public type SaveBrushRequest = {
         id : ?Nat;
         name : Text;
@@ -370,8 +329,6 @@ module {
     };
 
     public type BrushRequest = { id : Nat };
-
-    public type FetchCatalogsRequest = { canisters : [Text] };
 
     public type ProposeTradeRequest = {
         peer : Text;
@@ -460,7 +417,6 @@ module {
     let QUERY_ROUTE_CYCLES : Nat = 0;
 
     let CANDID_SLACK : Nat = 64;
-    let MAX_FETCH_TARGETS : Nat = 8;
     // One crawl step, bounded by the same concurrency the manifest declares.
     let MAX_CRAWL_TARGETS : Nat = 8;
     let CRAWL_PAGE : Nat = 128;
@@ -509,7 +465,6 @@ module {
                 holdings = Holdings.count(mem);
                 holdings_limit = Holdings.MAX_HOLDINGS;
                 directory_count = Map.size(mem.directory);
-                catalog_designers = Map.size(mem.catalog_cache);
                 incoming_pending = incoming;
                 outgoing_active = outgoing;
                 crawl = crawlView();
@@ -586,64 +541,12 @@ module {
                             ignored = entry.ignored;
                             retired = entry.retired;
                             strikes = entry.strikes;
-                            last_catalog_ns = entry.last_catalog_ns;
-                            design_count = entry.design_count;
                             owns_chip = Holdings.ownsAnyFrom(mem, entry.canister);
                             contact_name = contactName(entry.canister);
                         };
                     },
                 );
                 total = page.total;
-            };
-        };
-
-        public func /*query*/chipswap_store(request : StoreRequest) : StorePage {
-            let empty = { rows = []; total = 0; nsfw_hidden = 0 };
-            // No designer picked is an empty string. Anything else has to be a
-            // principal we can compare against, so text that is not one narrows
-            // the market to nothing rather than quietly widening it to
-            // everything.
-            let designer : ?Principal = if (request.designer == "") null else {
-                switch (PrincipalText.parse(request.designer)) {
-                    case (?value) ?value;
-                    case null return empty;
-                };
-            };
-            let filter = {
-                ownership = request.ownership;
-                nsfw = request.nsfw;
-                requirements = request.requirements;
-                designer;
-                search = request.search;
-                sort = request.sort;
-            };
-            if (not Directory.validFilter(filter)) return empty;
-            let page = Directory.storeRows(
-                mem,
-                filter,
-                request.offset,
-                boundedLimit(request.limit),
-            );
-            {
-                rows = Array.map<Directory.StoreRow, StoreRowView>(
-                    page.rows,
-                    func(row) {
-                        {
-                            designer = Principal.toText(row.designer);
-                            design_id = row.design_id;
-                            title = row.title;
-                            art = artView(row.art);
-                            requirements = requirementsView(row.requirements);
-                            nsfw = row.nsfw;
-                            design_revision = row.design_revision;
-                            owned = row.owned;
-                            fetched_at_ns = row.fetched_at_ns;
-                            contact_name = contactName(row.designer);
-                        };
-                    },
-                );
-                total = page.total;
-                nsfw_hidden = page.nsfw_hidden;
             };
         };
 
@@ -1082,95 +985,6 @@ module {
             };
             bump();
             #ok(crawlView());
-        };
-
-        public func /*update*/chipswap_fetch_catalogs(
-            request : FetchCatalogsRequest
-        ) : async* FetchCatalogsResult {
-            if (request.canisters.size() == 0) return #err(error("invalid_request"));
-            if (request.canisters.size() > MAX_FETCH_TARGETS) return #err(error("too_many_targets"));
-            let targets = List.empty<Principal>();
-            for (text in request.canisters.values()) {
-                switch (parsePrincipal(text)) {
-                    case (#err(code)) return #err(error(code));
-                    case (#ok(value)) {
-                        // Ignored and retired designers drop out the same way we
-                        // do: silently, because "did not answer" would be untrue
-                        // of a call we chose not to make.
-                        if (not Principal.equal(value, self) and Directory.reachable(mem, value)) {
-                            List.add(targets, value);
-                        };
-                    };
-                };
-            };
-            if (List.size(targets) == 0) return #err(error("invalid_request"));
-
-            let now = Time.now();
-            let payload = to_candid ({} : PeerCatalogRequest);
-            let requests = Array.map<Principal, NeutronCapabilities.BackendCallRequestV1>(
-                List.toArray(targets),
-                func(target) {
-                    routeCall(
-                        target,
-                        INGRESS_QUERY_METHOD,
-                        ROUTE_CATALOG,
-                        payload,
-                        QUERY_ROUTE_CYCLES,
-                    );
-                },
-            );
-            let results = await* calls.call_batch(requests);
-
-            let fetched = List.empty<Text>();
-            let failed = List.empty<Text>();
-            let ordered = List.toArray(targets);
-            var index = 0;
-            while (index < ordered.size()) {
-                let target = ordered[index];
-                let outcome = if (index < results.size()) ?results[index] else null;
-                switch (catalogFromResult(outcome)) {
-                    case (?catalog) {
-                        Directory.storeCatalog(
-                            mem,
-                            target,
-                            Array.map<Wire.Design, Memory.CachedDesign>(
-                                catalog.designs,
-                                func(design) {
-                                    {
-                                        design_id = design.design_id;
-                                        title = design.title;
-                                        art = design.art;
-                                        requirements = requirementsFromWire(design.requirements);
-                                        nsfw = design.nsfw;
-                                        design_revision = design.design_revision;
-                                        published_at_ns = design.published_at_ns;
-                                    };
-                                },
-                            ),
-                            now,
-                        );
-                        Directory.noteReachable(mem, target, now);
-                        List.add(fetched, Principal.toText(target));
-                    };
-                    case null {
-                        // Silence here concludes nothing about the designer.
-                        // The catalog route is a query, and a peer on a release
-                        // older than 108 exposes no query dispatcher to reject
-                        // it with — retiring them for that would be retiring
-                        // them for not having upgraded. Reachability is decided
-                        // on the paid routes, where a rejection means what it
-                        // says.
-                        List.add(failed, Principal.toText(target));
-                    };
-                };
-                index += 1;
-            };
-            bump();
-            #ok({
-                fetched = List.toArray(fetched);
-                failed = List.toArray(failed);
-                revision = mem.revision;
-            });
         };
 
         public func /*update*/chipswap_trade_propose(
@@ -1913,9 +1727,6 @@ public type chipswap_collection_Output = CollectionPage;
 public type chipswap_directory_Input = (request : PageRequest);
 public type chipswap_directory_Output = DirectoryPage;
 
-public type chipswap_store_Input = (request : StoreRequest);
-public type chipswap_store_Output = StorePage;
-
 public type chipswap_trades_Input = (());
 public type chipswap_trades_Output = TradesView;
 
@@ -1969,9 +1780,6 @@ public type chipswap_crawl_stop_Output = CrawlResult;
 
 public type chipswap_crawl_step_Input = (());
 public type chipswap_crawl_step_Output = CrawlResult;
-
-public type chipswap_fetch_catalogs_Input = (request : FetchCatalogsRequest);
-public type chipswap_fetch_catalogs_Output = FetchCatalogsResult;
 
 public type chipswap_trade_propose_Input = (request : ProposeTradeRequest);
 public type chipswap_trade_propose_Output = TradeActionResult;

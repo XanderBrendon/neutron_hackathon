@@ -10,7 +10,7 @@ import Text "mo:core/Text";
 import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v5";
+import Memory "./memory/chipswap/v6";
 import Requirements "./Requirements";
 import Shape "./Shape";
 import Wire "./Wire";
@@ -153,11 +153,10 @@ module {
     ) : Result<Proposal> {
         if (Principal.equal(args.peer, self)) return #err("self_trade");
         if (not Principal.isCanister(args.peer)) return #err("invalid_peer");
-        // The design must be one we have actually seen in the peer's catalog.
-        // Trading blind would spend a chip on a design that may not exist.
-        let ?_cached = Directory.cachedDesign(mem, args.peer, args.want_design_id) else {
-            return #err("unknown_design");
-        };
+        // Whether the peer really publishes this design is settled before we
+        // get here, by a live query in chipswap_trade_propose. It is not
+        // checked twice and it is never assumed: nothing below this line mints
+        // or escrows until that query has answered.
         if (Map.size(mem.outgoing) >= MAX_OUTGOING) return #err("outgoing_full");
 
         let requestId = newRequestId(mem, now);
