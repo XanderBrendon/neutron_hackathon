@@ -111,8 +111,9 @@ public type HistoryEntry = {
     peer : Principal;
     request_id : Blob;
     want_design_id : Nat;
-    gave : ?HistoryChip;        // the chip that left this canister
-    got : ?HistoryChip;         // the chip that arrived
+    ours : ?HistoryChip;        // the chip on our side of the trade
+    theirs : ?HistoryChip;      // the chip on their side
+    escrow_key : ?Text;         // holdings key, when our side was escrowed
     outcome : HistoryOutcome;
     started_at_ns : Int;
     settled_at_ns : Int;
@@ -121,10 +122,20 @@ public type HistoryEntry = {
 
 `Mem` gains `history : Map.Map<Nat, HistoryEntry>` and `var next_history_id : Nat`.
 
-`gave` and `got` are named from the owner's side rather than the proposer's, so
-one field means one thing in both directions. Both are optional because a
-refused trade moves no chip at all, and an unresolved one moved a chip whose
-arrival was never confirmed.
+`ours` and `theirs` name the two sides of the swap rather than the direction of
+travel, and `outcome` says whether the chips actually moved. Naming them `gave`
+and `got` would have been wrong for exactly the rows this feature exists to
+show: an offer we declined moved nothing, so both fields would be null and the
+row could not name the chip we turned down. As sides, each field is populated
+whenever that side of the trade was ever identified.
+
+Both stay optional because a side can genuinely have no chip: a peer who
+declines never mints one, and an offer we refuse is never matched.
+
+`escrow_key` carries `OutgoingTrade.offered_key` across — null when the offer
+was minted from one of our own designs. Resolving an unresolved entry later has
+to release or consume the escrowed chip, and the holdings key is how it finds
+it.
 
 **The subtraction.** `OutgoingState` drops `#completed`, `#declined`, and
 `#failed`, leaving `{#sending; #pending_designer; #uncertain}`. Terminal rows
@@ -158,7 +169,7 @@ is how one gets missed. They funnel through a single function that removes the
 row and writes the entry as one act:
 
 ```motoko
-func settleOutgoing(mem, key, trade, outcome, got : ?HistoryChip, now)
+func settleOutgoing(mem, key, trade, theirs : ?HistoryChip, outcome, now)
 ```
 
 Only `#sending`, `#pending_designer`, and `#uncertain` keep calling
@@ -173,10 +184,10 @@ one place a settled inbound row is dropped, and the state it needs is still on
 the row: `#accepted` becomes `#traded`, `#declined` becomes `#declined_by_owner`.
 The entry is written immediately before the `Map.remove`.
 
-For `#traded`, `gave` is the mint of our own design (`want_design_id` and the
-serial recorded in `#accepted`) and `got` is the peer's offered chip. For
-`#declined_by_owner`, both are null: their chip went back to them and ours was
-never minted.
+For `#traded`, `ours` is the mint of our own design (`want_design_id` and the
+serial recorded in `#accepted`) and `theirs` is the peer's offered chip. For
+`#declined_by_owner`, `ours` is null — we never minted — and `theirs` still
+names the chip we turned down, which is the whole content of that row.
 
 ### 6.3 One visible consequence
 
@@ -213,6 +224,15 @@ want it gone — with the row saying plainly what it costs.
 - `chipswap_trade_abandon(TradeRequestRef) : RevisionResult` — valid only on an
   `#uncertain` row. Writes an `#unresolved` entry and drops the row. The chip is
   not touched.
+
+**Kept working by a history lookup**
+
+Dropping the terminal variants removes the `already_final` branch that
+`deliverInbound` and `resolveOutgoing` answer a repeat call with. Without a
+replacement, a peer retrying a delivery for a trade we have already settled
+would get `unknown_trade` and retry forever. Both therefore fall back to
+history: a settled entry for that `(peer, request_id)` still answers
+`already_final`, so the peer stops.
 
 **Changed**
 
@@ -255,7 +275,8 @@ Test-first, per the repository workflow.
   rows become history entries in `created_at_ns` order with ids from 1, and
   `next_history_id` lands past the last one.
 - `test/trade_history.test.mo` — each of the five outcomes records one entry
-  with the right `gave` and `got`; eviction at 256 drops the oldest and never
+  with the right `ours` and `theirs`; a settled entry still answers a repeated
+  delivery with `already_final`; eviction at 256 drops the oldest and never
   refuses; `forgetHistory` removes one; `clearHistory` skips unresolved rows;
   abandoning leaves the chip `#uncertain`; resolving from history settles both
   the entry and the chip.
