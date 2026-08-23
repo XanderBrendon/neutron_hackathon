@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { cx } from "neutron-design-system";
 import { copyToClipboard, onAppStateChange } from "neutron-tools/app";
 import {
@@ -191,24 +191,34 @@ export const DirectoryView = ({ status, onChanged }: Props) => {
     }
   }, []);
 
+  // What to do when a crawl ends, kept in a ref rather than in the listener's
+  // closure. The subscription is set up once, so a listener that closed over
+  // `offset` would still be holding the page the owner was on when they opened
+  // the tab — and would reload that page's rows underneath whichever page they
+  // are actually looking at.
+  const onCrawlFinished = useRef<(progress: CrawlProgress) => void>(() => {});
+  useEffect(() => {
+    onCrawlFinished.current = (progress) => {
+      setMessage(describeOutcome(progress));
+      void (async () => {
+        await reload(offset);
+        await onChanged();
+      })();
+    };
+  });
+
   // A crawl this tile did not start is still this owner's crawl. Reopening the
   // Directory during one picks it up rather than showing an idle button.
   useEffect(() => {
     void readCrawl();
-    const stop = onAppStateChange("crawl", () => {
+    return onAppStateChange("crawl", () => {
       void (async () => {
         const progress = await readCrawl();
         if (progress !== null && !progress.active) {
-          setMessage(describeOutcome(progress));
-          await reload(offset);
-          await onChanged();
+          onCrawlFinished.current(progress);
         }
       })();
     });
-    return stop;
-    // `offset` is read inside the listener rather than depended on: resubscribing
-    // on every page turn would drop a nudge that arrived mid-swap.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [readCrawl]);
 
   const beginCrawl = async () => {
