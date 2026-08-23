@@ -14,6 +14,7 @@ import {
   parseIncomingTrade,
   parseOutgoingTrade,
   parseStatus,
+  parseTradeHistoryEntry,
   parseRequirements,
   parseSuggestion,
   shortPrincipal,
@@ -337,5 +338,92 @@ test("a crawl's outcome separates what was found from what was seated", () => {
 test("a nonsense count is refused rather than rendered", () => {
   expect(() =>
     parseFoundSummary({ added: "-1", skipped: "0", full: false, revision: "1" }),
+  ).toThrow();
+});
+
+// --- The record a finished trade leaves ------------------------------------
+
+test("a history entry parses both sides of a trade", () => {
+  const entry = parseTradeHistoryEntry({
+    entry_id: 4,
+    direction: "outgoing",
+    peer: "aaaaa-aa",
+    request_id: "ab12",
+    want_design_id: 3,
+    ours: { title: "Bluebird", designer: "aaaaa-aa", design_id: 1, serial: 2 },
+    theirs: { title: "Ember", designer: "aaaaa-aa", design_id: 3, serial: 9 },
+    outcome: "traded",
+    detail: null,
+    started_at_ns: "100",
+    settled_at_ns: "200",
+    contact_name: "Rae",
+  });
+
+  expect(entry.entryId).toBe(4);
+  expect(entry.outcome).toBe("traded");
+  expect(entry.ours?.title).toBe("Bluebird");
+  expect(entry.theirs?.serial).toBe(9);
+  expect(entry.contactName).toBe("Rae");
+});
+
+// The row the ledger exists for. An offer we turned down moved no chip of
+// ours, and it still has to name the chip we refused.
+test("a declined offer parses with no chip on our side", () => {
+  const entry = parseTradeHistoryEntry({
+    entry_id: 5,
+    direction: "incoming",
+    peer: "aaaaa-aa",
+    request_id: "cd34",
+    want_design_id: 2,
+    ours: null,
+    theirs: { title: "Ochre", designer: "aaaaa-aa", design_id: 2, serial: 4 },
+    outcome: "declined_by_owner",
+    detail: null,
+    started_at_ns: "10",
+    settled_at_ns: "20",
+    contact_name: null,
+  });
+
+  expect(entry.ours).toBeNull();
+  expect(entry.theirs?.title).toBe("Ochre");
+  expect(entry.outcome).toBe("declined_by_owner");
+});
+
+test("a peer's reason survives on a trade they refused", () => {
+  const entry = parseTradeHistoryEntry({
+    entry_id: 6,
+    direction: "outgoing",
+    peer: "aaaaa-aa",
+    request_id: "ef56",
+    want_design_id: 1,
+    ours: { title: "Ash", designer: "aaaaa-aa", design_id: 1, serial: 1 },
+    theirs: null,
+    outcome: "declined_by_peer",
+    detail: "min_colors",
+    started_at_ns: "1",
+    settled_at_ns: "2",
+    contact_name: null,
+  });
+
+  expect(entry.detail).toBe("min_colors");
+  expect(entry.theirs).toBeNull();
+});
+
+test("an outcome the app does not know is refused rather than rendered", () => {
+  expect(() =>
+    parseTradeHistoryEntry({
+      entry_id: 7,
+      direction: "outgoing",
+      peer: "aaaaa-aa",
+      request_id: "0011",
+      want_design_id: 1,
+      ours: null,
+      theirs: null,
+      outcome: "half_traded",
+      detail: null,
+      started_at_ns: "1",
+      settled_at_ns: "2",
+      contact_name: null,
+    }),
   ).toThrow();
 });

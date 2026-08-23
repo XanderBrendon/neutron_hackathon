@@ -130,16 +130,40 @@ export type OutgoingTrade = {
   offeredSerial: number;
   offeredTitle: string;
   offeredKey: string | null;
-  state:
-    | "sending"
-    | "pending_designer"
-    | "completed"
-    | "declined"
-    | "failed"
-    | "uncertain";
+  state: "sending" | "pending_designer" | "uncertain";
   detail: string | null;
   createdAtNs: string;
   updatedAtNs: string;
+  contactName: string | null;
+};
+
+export type HistoryChip = {
+  title: string;
+  designer: string;
+  designId: number;
+  serial: number;
+};
+
+// `ours` and `theirs` are the two sides of the swap, and either may be absent:
+// a peer who declined never minted, and an offer we refused was never matched.
+// `outcome` is what says whether the chips actually moved.
+export type TradeHistoryEntry = {
+  entryId: number;
+  direction: "outgoing" | "incoming";
+  peer: string;
+  requestId: string;
+  wantDesignId: number;
+  ours: HistoryChip | null;
+  theirs: HistoryChip | null;
+  outcome:
+    | "traded"
+    | "declined_by_peer"
+    | "declined_by_owner"
+    | "failed"
+    | "unresolved";
+  detail: string | null;
+  startedAtNs: string;
+  settledAtNs: string;
   contactName: string | null;
 };
 
@@ -405,19 +429,55 @@ export function parseOutgoingTrade(value: unknown): OutgoingTrade {
     offeredKey: optionalText(source.offered_key, "offered key"),
     state: oneOf(
       source.state,
-      [
-        "sending",
-        "pending_designer",
-        "completed",
-        "declined",
-        "failed",
-        "uncertain",
-      ] as const,
+      ["sending", "pending_designer", "uncertain"] as const,
       "trade state",
     ),
     detail: optionalText(source.detail, "detail"),
     createdAtNs: nsText(source.created_at_ns, "created time"),
     updatedAtNs: nsText(source.updated_at_ns, "updated time"),
+    contactName: optionalText(source.contact_name, "contact name"),
+  };
+}
+
+function parseHistoryChip(value: unknown, label: string): HistoryChip | null {
+  if (value === null || value === undefined) return null;
+  const source = record(value, label);
+  return {
+    title: text(source.title, "chip title"),
+    designer: text(source.designer, "chip designer"),
+    designId: natNumber(source.design_id, "chip design id"),
+    serial: natNumber(source.serial, "chip serial"),
+  };
+}
+
+export function parseTradeHistoryEntry(value: unknown): TradeHistoryEntry {
+  const source = record(value, "history entry");
+  return {
+    entryId: natNumber(source.entry_id, "entry id"),
+    direction: oneOf(
+      source.direction,
+      ["outgoing", "incoming"] as const,
+      "direction",
+    ),
+    peer: text(source.peer, "peer"),
+    requestId: text(source.request_id, "request id"),
+    wantDesignId: natNumber(source.want_design_id, "design id"),
+    ours: parseHistoryChip(source.ours, "our chip"),
+    theirs: parseHistoryChip(source.theirs, "their chip"),
+    outcome: oneOf(
+      source.outcome,
+      [
+        "traded",
+        "declined_by_peer",
+        "declined_by_owner",
+        "failed",
+        "unresolved",
+      ] as const,
+      "outcome",
+    ),
+    detail: optionalText(source.detail, "detail"),
+    startedAtNs: nsText(source.started_at_ns, "start time"),
+    settledAtNs: nsText(source.settled_at_ns, "settle time"),
     contactName: optionalText(source.contact_name, "contact name"),
   };
 }
@@ -522,6 +582,22 @@ export async function loadTrades(): Promise<{
   return {
     incoming: list(value.incoming, "incoming trades").map(parseIncomingTrade),
     outgoing: list(value.outgoing, "outgoing trades").map(parseOutgoingTrade),
+  };
+}
+
+export async function loadTradeHistory(
+  offset: number,
+  limit: number,
+): Promise<{ entries: TradeHistoryEntry[]; total: number }> {
+  const value = record(
+    await querySelf("chipswap_trade_history", [
+      { offset: String(offset), limit: String(limit) },
+    ] as unknown as JsonValue[]),
+    "trade history",
+  );
+  return {
+    entries: list(value.entries, "history list").map(parseTradeHistoryEntry),
+    total: natNumber(value.total, "total"),
   };
 }
 
@@ -696,9 +772,23 @@ export async function deleteBrush(id: number): Promise<number> {
   );
 }
 
-export async function forgetTrade(requestId: string): Promise<number> {
+export async function forgetHistoryEntry(entryId: number): Promise<number> {
   return parseRevision(
-    await updateSelf("chipswap_trade_forget", [
+    await updateSelf("chipswap_history_forget", [
+      { entry_id: String(entryId) },
+    ] as unknown as JsonValue[]),
+  );
+}
+
+// Clears what is finished. An unresolved record stays, because it is the last
+// thing naming a chip that is still committed to a trade.
+export async function clearTradeHistory(): Promise<number> {
+  return parseRevision(await updateSelf("chipswap_history_clear", NO_ARGUMENT));
+}
+
+export async function abandonTrade(requestId: string): Promise<number> {
+  return parseRevision(
+    await updateSelf("chipswap_trade_abandon", [
       { request_id: requestId },
     ] as unknown as JsonValue[]),
   );
