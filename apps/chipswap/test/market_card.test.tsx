@@ -103,9 +103,9 @@ test("the policy is held to a band of the card rather than sizing it", () => {
   expect(render(demanding)).toContain("chipswap-chip-requirements");
 });
 
-// The band shows two rows of badges and scrolls past that, so a chip asking
+// The band shows four rows of badges and scrolls past that, so a chip asking
 // for more than fits has to say the whole of it somewhere a reader can reach
-// without scrolling a 48-pixel box.
+// without scrolling a band of the card.
 test("the band carries the whole policy in words", () => {
   const markup = render(
     row({

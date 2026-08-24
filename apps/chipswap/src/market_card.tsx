@@ -33,9 +33,10 @@ export const MarketCard = ({ row, busy, onTrade, onSetIgnored }: Props) => {
   const source = row.contactName
     ? `${row.contactName} · ${row.designer}`
     : row.designer;
-  // The badges are the policy at a glance and the band holds two rows of them;
-  // this is the whole of it in words, for the design that asks for more than
-  // that. The offer dialog says the same thing at length once you get there.
+  // The badges are the policy at a glance and the band holds four rows of
+  // them; this is the whole of it in words, for the design that asks for more
+  // than that. The offer dialog says the same thing at length once you get
+  // there.
   const asks = describeRequirements(row.requirements);
   const policy = [
     row.nsfw ? "Tagged NSFW." : null,

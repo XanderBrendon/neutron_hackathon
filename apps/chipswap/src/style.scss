@@ -480,23 +480,30 @@
     overflow: hidden;
   }
 
-  /* Room for two badges' worth of policy, and a scroll for the rare design
-     that asks for more. Reserving room for all five a design could ask for
-     would leave most cards mostly empty, and clipping the fifth would hide
-     what a trade costs — which is the one thing this band is here to say. */
+  /* Room for four badges' worth of policy, which is every requirement a design
+     can ask for short of tagging itself NSFW as well, and a scroll for that
+     last case. The rows are set tighter than badges sit elsewhere so four of
+     them cost the card less height than three would at the usual spacing. */
   .chipswap-chip-requirements {
     --chipswap-badge-row: 22px; /* .nt-badge min-height */
-    block-size: calc((var(--chipswap-badge-row) * 2) + var(--nt-gap-1, 4px));
+    --chipswap-badge-gap: 2px;
+    block-size: calc(
+      (var(--chipswap-badge-row) * 4) + (var(--chipswap-badge-gap) * 3)
+    );
     flex: none;
     overflow-y: auto;
     overscroll-behavior: contain;
     /* The app paints its own scrollbars away until something hovers them, and
        scrollbar-color inherits, so a band left to inherit would keep what it
        is holding back a secret. Here the bar is not furniture: on a chip that
-       asks for more than two rows' worth it is the only standing sign that
+       asks for more than four rows' worth it is the only standing sign that
        there is more policy below, so it shows whether pointed at or not. */
     scrollbar-color: var(--nt-scrollbar-thumb) transparent;
     scrollbar-width: thin;
+  }
+
+  .chipswap-chip-requirements .chipswap-badges {
+    gap: var(--chipswap-badge-gap);
   }
 
   /* One line each, always. A badge left to wrap its own text is two rows tall,
