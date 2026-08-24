@@ -85,3 +85,61 @@ test("nothing on the card is pressable while a call is in flight", () => {
 test("a chip already in the collection still says so", () => {
   expect(render(row({ owned: true }))).toContain("owned");
 });
+
+// A grid of tiles reads as a grid only if the tiles agree on their size, so
+// the policy gets a band of the card rather than as much of it as it needs.
+test("the policy is held to a band of the card rather than sizing it", () => {
+  const demanding = row({
+    nsfw: true,
+    requirements: {
+      approval: true,
+      minColors: 6,
+      maxCoverage: 40,
+      nsfw: "disallowed",
+    },
+  });
+
+  expect(render(row())).toContain("chipswap-chip-requirements");
+  expect(render(demanding)).toContain("chipswap-chip-requirements");
+});
+
+// The band shows two rows of badges and scrolls past that, so a chip asking
+// for more than fits has to say the whole of it somewhere a reader can reach
+// without scrolling a 48-pixel box.
+test("the band carries the whole policy in words", () => {
+  const markup = render(
+    row({
+      nsfw: true,
+      requirements: {
+        approval: true,
+        minColors: 6,
+        maxCoverage: 40,
+        nsfw: "disallowed",
+      },
+    }),
+  );
+
+  expect(markup).toContain(
+    "Tagged NSFW. Asks for 6 colors or more, no color over 40%, nothing tagged NSFW, designer approves.",
+  );
+});
+
+test("a design that asks for nothing says so there too", () => {
+  expect(render(row())).toContain("Swaps freely: asks for nothing in particular.");
+});
+
+// Held open whether or not there is a tag to put in it: an empty line here is
+// what keeps this card the height of the one beside it.
+test("the tag line is part of the card whether or not it has a tag", () => {
+  expect(render(row())).toContain("chipswap-chip-tags");
+  expect(render(row({ owned: true }))).toContain("chipswap-chip-tags");
+});
+
+// Every line the tile holds to a set height keeps its full text in a title, so
+// what the tile trims is a hover away rather than gone.
+test("what the tile trims is still readable in full", () => {
+  const markup = render(row({ contactName: "a-very-long-contact-name" }));
+
+  expect(markup).toContain('title="Moonrise"');
+  expect(markup).toContain('title="a-very-long-contact-name · aaaaa-aa"');
+});

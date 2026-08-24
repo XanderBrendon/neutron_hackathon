@@ -424,6 +424,108 @@
     margin-top: 4px;
   }
 
+  /* ---------- market card ---------- */
+
+  /* A grid of tiles reads as a grid only if the tiles agree on their size, so
+     every part of a market card that could run long is held to a set number of
+     lines. A chip asking for four things is then the same shape as one asking
+     for nothing, and the pair of buttons at the foot of each card lands on the
+     same line all the way across the page. */
+  .chipswap-market-card {
+    block-size: 100%;
+  }
+
+  /* A column rather than the collection card's grid, so the actions can be
+     pushed to the foot of a card the grid has stretched taller than its
+     contents. Stretched to the card's full width as well: left to size itself
+     to its text, a card with a short designer name would be narrow enough to
+     break its two buttons onto separate lines while the card beside it kept
+     them on one. */
+  .chipswap-market-card .chipswap-chip-meta {
+    align-self: stretch;
+    display: flex;
+    flex: 1;
+    flex-direction: column;
+  }
+
+  .chipswap-market-card .chipswap-chip-actions {
+    margin-top: auto;
+  }
+
+  .chipswap-chip-title {
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    block-size: calc(var(--nt-font-size-body) * var(--nt-line-height-tight) * 2);
+    display: -webkit-box;
+    line-clamp: 2;
+    line-height: var(--nt-line-height-tight);
+    overflow: hidden;
+  }
+
+  .chipswap-chip-source {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* Two lines, which is what a formatted date takes at this width, whether the
+     date fills them or the word "never" leaves one empty. */
+  .chipswap-chip-seen {
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    block-size: calc(var(--nt-font-size-meta) * var(--nt-line-height-body) * 2);
+    display: -webkit-box;
+    line-clamp: 2;
+    line-height: var(--nt-line-height-body);
+    overflow: hidden;
+  }
+
+  /* Room for two badges' worth of policy, and a scroll for the rare design
+     that asks for more. Reserving room for all five a design could ask for
+     would leave most cards mostly empty, and clipping the fifth would hide
+     what a trade costs — which is the one thing this band is here to say. */
+  .chipswap-chip-requirements {
+    --chipswap-badge-row: 22px; /* .nt-badge min-height */
+    block-size: calc((var(--chipswap-badge-row) * 2) + var(--nt-gap-1, 4px));
+    flex: none;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    /* The app paints its own scrollbars away until something hovers them, and
+       scrollbar-color inherits, so a band left to inherit would keep what it
+       is holding back a secret. Here the bar is not furniture: on a chip that
+       asks for more than two rows' worth it is the only standing sign that
+       there is more policy below, so it shows whether pointed at or not. */
+    scrollbar-color: var(--nt-scrollbar-thumb) transparent;
+    scrollbar-width: thin;
+  }
+
+  /* One line each, always. A badge left to wrap its own text is two rows tall,
+     which no longer lines up with the band and leaves the reader looking at a
+     requirement sliced through the middle. Cut short with an ellipsis instead,
+     and the band's title still has every word of it. */
+  .chipswap-chip-requirements .nt-badge {
+    display: block;
+    line-height: var(--chipswap-badge-row);
+    max-inline-size: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  /* One line, never two: "owned" and "ignored" together are shorter than the
+     narrowest column the grid lays out. */
+  .chipswap-chip-tags {
+    block-size: 20px; /* .nt-tag min-height */
+    display: flex;
+    flex-wrap: nowrap;
+    gap: var(--nt-gap-1, 4px);
+    overflow: hidden;
+  }
+
+  .chipswap-chip-tags .nt-tag {
+    flex: none;
+  }
+
   /* Last in the card and quieter than the rest: taking a picture away is
      something you go looking for, not the first thing the card offers. */
   .chipswap-chip-saves {
