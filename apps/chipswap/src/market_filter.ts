@@ -73,62 +73,6 @@ export function defaultFilter(): MarketFilter {
   };
 }
 
-function parseBoolean(value: unknown, fallback: boolean): boolean {
-  return typeof value === "boolean" ? value : fallback;
-}
-
-function parseFacets(value: unknown): RequirementFacet[] {
-  if (!Array.isArray(value)) return [];
-  const asked = new Set(
-    value.filter((entry): entry is string => typeof entry === "string"),
-  );
-  // Reading through the canonical list does the whole job at once: a name this
-  // build does not know is dropped, a repeat collapses, and the order is the
-  // one the rest of the app uses however the stored copy was written.
-  return REQUIREMENT_FACETS.map((facet) => facet.value).filter((facet) =>
-    asked.has(facet),
-  );
-}
-
-function parseSort(value: unknown, fallback: MarketSort): MarketSort {
-  return SORT_OPTIONS.some((option) => option.value === value)
-    ? (value as MarketSort)
-    : fallback;
-}
-
-/**
- * A filter read back from somewhere that could hold anything — a stored copy,
- * an older build's copy, a hand-edited one.
- *
- * Every axis falls back on its own rather than the whole filter failing
- * together: a set of choices where one name has gone bad is still mostly the
- * choices the reader made, and throwing all of them away would be a worse
- * answer than keeping the ones that still read.
- */
-export function parseFilter(value: unknown): MarketFilter {
-  const fallback = defaultFilter();
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    return fallback;
-  }
-  const stored = value as Record<string, unknown>;
-  return {
-    hideOwned: parseBoolean(stored.hideOwned, fallback.hideOwned),
-    showNsfw: parseBoolean(stored.showNsfw, fallback.showNsfw),
-    requirements: parseFacets(stored.requirements),
-    // An empty principal is nobody, which is what "every designer" already
-    // says, so it reads back as no constraint rather than as one nothing meets.
-    designer:
-      typeof stored.designer === "string" && stored.designer !== ""
-        ? stored.designer
-        : fallback.designer,
-    search:
-      typeof stored.search === "string"
-        ? normalizedSearch(stored.search)
-        : fallback.search,
-    sort: parseSort(stored.sort, fallback.sort),
-  };
-}
-
 export function isDefaultFilter(filter: MarketFilter): boolean {
   return (
     !filter.hideOwned &&

@@ -8,7 +8,6 @@ import {
   canonicalFacets,
   isDefaultFilter,
   normalizedSearch,
-  parseFilter,
   toggleFacet,
 } from "../src/market_filter.ts";
 
@@ -119,74 +118,6 @@ test("the label names only the axes that are narrowing the view", () => {
       sort: "title",
     }),
   ).toBe("Chips I don't own · Swaps freely · one designer · \u201Cmoon\u201D · NSFW shown");
-});
-
-// The market's filter is kept in the browser between visits, so what comes back
-// is whatever was under that key: this build's copy, an older build's, or
-// something hand-edited.
-test("a filter written by this build reads back unchanged", () => {
-  const narrowed = {
-    hideOwned: true,
-    showNsfw: true,
-    requirements: ["open", "approval"],
-    designer: "aaaaa-aa",
-    search: "moon",
-    sort: "title",
-  };
-  expect(parseFilter(narrowed)).toEqual(narrowed);
-});
-
-test("anything that is not a filter at all reads as the default", () => {
-  expect(parseFilter(null)).toEqual(defaultFilter());
-  expect(parseFilter("moon")).toEqual(defaultFilter());
-  expect(parseFilter([])).toEqual(defaultFilter());
-  expect(parseFilter(undefined)).toEqual(defaultFilter());
-  expect(parseFilter({})).toEqual(defaultFilter());
-});
-
-// One axis gone bad should not throw away the others: what is left is still
-// mostly the choices the reader made.
-test("an axis that will not read falls back on its own", () => {
-  const parsed = parseFilter({
-    hideOwned: "yes",
-    showNsfw: true,
-    requirements: "open",
-    designer: 7,
-    search: 12,
-    sort: "sideways",
-  });
-  expect(parsed).toEqual({ ...defaultFilter(), showNsfw: true });
-});
-
-test("a facet this build does not know is dropped from the set", () => {
-  expect(parseFilter({ requirements: ["open", "telepathy"] }).requirements).toEqual([
-    "open",
-  ]);
-});
-
-// Storage has no order and no notion of a set, so a stored copy can hold the
-// facets shuffled or repeated and still mean one set of choices.
-test("stored facets read back canonical however they were written", () => {
-  expect(
-    parseFilter({ requirements: ["approval", "open", "open"] }).requirements,
-  ).toEqual(["open", "approval"]);
-});
-
-test("a stored search is trimmed and cut to the ceiling like a typed one", () => {
-  expect(parseFilter({ search: "  moon  " }).search).toBe("moon");
-  expect(
-    parseFilter({ search: "a".repeat(MAX_SEARCH_CHARS + 10) }).search,
-  ).toHaveLength(MAX_SEARCH_CHARS);
-});
-
-// An empty principal is nobody, which is what "every designer" already says.
-test("an empty designer reads as no designer constraint", () => {
-  expect(parseFilter({ designer: "" }).designer).toBeNull();
-});
-
-test("a stored filter that is already the default stays the default", () => {
-  expect(parseFilter(defaultFilter())).toEqual(defaultFilter());
-  expect(isDefaultFilter(parseFilter(defaultFilter()))).toBe(true);
 });
 
 // A search longer than the ceiling says nothing a shorter one does not, and an

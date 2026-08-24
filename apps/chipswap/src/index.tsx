@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import { cx, nt } from "neutron-design-system";
 import { errorMessage, loadStatus, type Status } from "./api.ts";
+import { defaultFilter, type MarketFilter } from "./market_filter.ts";
 import { Collection } from "./views/collection.tsx";
 import { DirectoryView } from "./views/directory.tsx";
 import { Market } from "./views/market.tsx";
@@ -23,6 +24,16 @@ export const App = () => {
   const [view, setView] = useState<ViewId>("studio");
   const [status, setStatus] = useState<Status | null>(null);
   const [failure, setFailure] = useState<string | null>(null);
+  // Held by the shell rather than by the Market, because only one view is
+  // mounted at a time: looking at the Studio unmounts the Market, and a filter
+  // kept inside it would be discarded on the way out. The shell is what lasts
+  // as long as the tile does, so it is what remembers.
+  //
+  // Storage is not an option here. A tile frame is sandboxed `allow-scripts`
+  // with no `allow-same-origin`, so its origin is opaque and `localStorage`
+  // throws rather than persists; the background's origin
+  // (`src/resident/store.ts`) is the only one in this app that keeps anything.
+  const [marketFilter, setMarketFilter] = useState<MarketFilter>(defaultFilter);
 
   const refresh = useCallback(async () => {
     try {
@@ -91,7 +102,14 @@ export const App = () => {
           {view === "collection" ? (
             <Collection status={status} onChanged={refresh} />
           ) : null}
-          {view === "market" ? <Market status={status} onChanged={refresh} /> : null}
+          {view === "market" ? (
+            <Market
+              filter={marketFilter}
+              onChanged={refresh}
+              setFilter={setMarketFilter}
+              status={status}
+            />
+          ) : null}
           {view === "trades" ? <Trades onChanged={refresh} /> : null}
           {view === "directory" ? (
             <DirectoryView status={status} onChanged={refresh} />
