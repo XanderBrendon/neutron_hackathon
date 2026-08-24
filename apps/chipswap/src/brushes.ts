@@ -1,15 +1,26 @@
 // Brushes are a cell mask plus an anchor. Stamping maps the mask onto chip
 // coordinates and keeps only the cells that land inside the circular mask, so a
 // brush near the edge paints less rather than spilling into the next row.
+//
+// The fill brush is the one that has no shape. It is a "flood" brush: what it
+// stamps is a single seed pixel, and flood.ts grows that into the region the
+// tool acts on. Keeping it a brush rather than a tool of its own is what lets
+// it be filled, locked, or unlocked with — the tool decides what happens to
+// the region, the brush decides which pixels the region is.
 
 import { decodeHex, encodeHex, pixelIndexAt } from "./chip.ts";
+import { floodRegion, type FloodOptions } from "./flood.ts";
 
 export const MAX_BRUSH_CELLS = 49;
 export const MAX_BRUSH_SIDE = 7;
 
+/** A mask brush paints the cells it carries; a flood brush seeds a region. */
+export type BrushKind = "mask" | "flood";
+
 export type Brush = {
   id: string;
   name: string;
+  kind: BrushKind;
   width: number;
   height: number;
   anchorX: number;
@@ -34,10 +45,12 @@ function brush(
   anchorX: number,
   anchorY: number,
   cells: number[],
+  kind: BrushKind = "mask",
 ): Brush {
   return {
     id,
     name,
+    kind,
     width,
     height,
     anchorX,
@@ -48,10 +61,11 @@ function brush(
 
 export const PRESET_BRUSHES: readonly Brush[] = [
   brush("dot", "1 px", 1, 1, 0, 0, [1]),
-  brush("square2", "2 × 2", 2, 2, 0, 0, [1, 1, 1, 1]),
   brush("square3", "3 × 3", 3, 3, 1, 1, [1, 1, 1, 1, 1, 1, 1, 1, 1]),
   brush("cross", "Cross", 3, 3, 1, 1, [0, 1, 0, 1, 1, 1, 0, 1, 0]),
   brush("ex", "X", 3, 3, 1, 1, [1, 0, 1, 0, 1, 0, 1, 0, 1]),
+  // Last in the row: the one brush that is a rule rather than a shape.
+  brush("fill", "Fill", 1, 1, 0, 0, [1], "flood"),
 ];
 
 export function presetBrush(id: string): Brush {
@@ -74,6 +88,26 @@ export function stamp(brush: Brush, x: number, y: number): number[] {
     }
   }
   return indices;
+}
+
+/**
+ * The pixels a brush covers when clicked at (x, y): a mask brush covers the
+ * cells it carries, a flood brush the region growing out of the pixel under
+ * the pointer. `throughLocks` is for unlocking, where a lock cannot be the
+ * wall — see flood.ts.
+ */
+export function brushCoverage(
+  brush: Brush,
+  pixels: Uint8Array,
+  locks: Uint8Array,
+  x: number,
+  y: number,
+  { throughLocks = false }: FloodOptions = {},
+): number[] {
+  if (brush.kind !== "flood") return stamp(brush, x, y);
+  const start = pixelIndexAt(x, y);
+  if (start === null) return [];
+  return floodRegion(pixels, locks, start, { throughLocks });
 }
 
 export function brushToRecord(brush: Brush, name: string): BrushRecord {
@@ -112,6 +146,7 @@ export function brushFromRecord(record: BrushRecord & { id: number }): Brush {
   return {
     id: `custom-${record.id}`,
     name: record.name,
+    kind: "mask",
     width,
     height,
     anchorX,
@@ -126,6 +161,7 @@ export function blankBrush(side = 5): Brush {
   return {
     id: "draft",
     name: "",
+    kind: "mask",
     width: side,
     height: side,
     anchorX: anchor,

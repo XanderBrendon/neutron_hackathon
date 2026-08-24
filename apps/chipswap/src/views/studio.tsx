@@ -20,6 +20,7 @@ import { openRequirements } from "../requirements.ts";
 import {
   PRESET_BRUSHES,
   blankBrush,
+  brushCoverage,
   brushFromRecord,
   brushIsEmpty,
   toggleBrushCell,
@@ -28,7 +29,7 @@ import {
 } from "../brushes.ts";
 import { BrushGlyph } from "../brush_glyph.tsx";
 import { ChipCanvas } from "../chip_canvas.tsx";
-import { decodePixels, encodePixels, pixelIndexAt } from "../chip.ts";
+import { decodePixels, encodePixels } from "../chip.ts";
 import {
   addPaletteColor,
   applyPattern,
@@ -50,17 +51,15 @@ import {
   type EditorState,
   type Pattern,
 } from "../editor_state.ts";
-import { floodRegion } from "../flood.ts";
 import { buildStamp, coverPlacement } from "../image_stamp.ts";
 import { clipboardImage, loadImage, type LoadedImage } from "../image_source.ts";
 import { GENERATORS, renderGenerator, type GeneratorId } from "../patterns.ts";
 import { MAX_PALETTE, blendColors, contrastColor } from "../palette.ts";
 
-type Tool = "paint" | "fill" | "lock" | "unlock";
+type Tool = "paint" | "lock" | "unlock";
 
 const TOOLS: Record<Tool, string> = {
   paint: "Paint",
-  fill: "Fill",
   lock: "Lock",
   unlock: "Unlock",
 };
@@ -291,6 +290,16 @@ export const Studio = ({ status, onChanged }: Props) => {
     );
   };
 
+  // Unlock is the one tool that reaches through locks, because a wall it
+  // exists to take down cannot also be what stops it.
+  const covered = useCallback(
+    (state: EditorState, x: number, y: number): number[] =>
+      brushCoverage(brush, state.pixels, state.locks, x, y, {
+        throughLocks: tool === "unlock",
+      }),
+    [brush, tool],
+  );
+
   // A drag is one edit: the first cell opens the stroke and the rest extend it,
   // so undo steps back over the whole line rather than one pixel at a time.
   const handlePaint = (x: number, y: number, phase: "start" | "move" | "end") => {
@@ -299,22 +308,20 @@ export const Studio = ({ status, onChanged }: Props) => {
       setEditor((current) => (current ? endStroke(current) : current));
       return;
     }
-    if (tool === "fill") {
-      // One click, one fill: a drag over the region it just painted must not
+    if (brush.kind === "flood") {
+      // One click, one fill: a drag over the region it just covered must not
       // stack an undo entry for every pixel the pointer crosses.
       if (phase !== "start") return;
-      const start = pixelIndexAt(x, y);
-      if (start === null) return;
       setPreview(null);
-      setEditor((current) =>
-        current
-          ? paint(
-              current,
-              floodRegion(current.pixels, current.locks, start),
-              current.activeColor,
-            )
-          : current,
-      );
+      setEditor((current) => {
+        if (!current) return current;
+        const region = covered(current, x, y);
+        if (region.length === 0) return current;
+        if (tool === "paint") {
+          return paint(current, region, current.activeColor);
+        }
+        return paintLocks(current, region, tool === "lock");
+      });
       return;
     }
     const indices = stamp(brush, x, y);
@@ -338,16 +345,9 @@ export const Studio = ({ status, onChanged }: Props) => {
     (x: number, y: number) => {
       if (!editor) return null;
       const ink = editor.palette[editor.activeColor] ?? "#f2f5f7";
-      if (tool === "fill") {
-        // The outline lands on the edge of the region itself, so a fill shows
-        // how far it would run before it runs.
-        const start = pixelIndexAt(x, y);
-        const region =
-          start === null ? [] : floodRegion(editor.pixels, editor.locks, start);
-        if (region.length === 0) return null;
-        return { cells: region, changes: region, color: ink };
-      }
-      const cells = stamp(brush, x, y);
+      // A flood brush outlines the region itself, so a fill shows how far it
+      // would run before it runs. A mask brush outlines its own cells.
+      const cells = covered(editor, x, y);
       if (cells.length === 0) return null;
       if (tool === "paint") {
         return {
@@ -364,7 +364,7 @@ export const Studio = ({ status, onChanged }: Props) => {
         color: "#f2f5f7",
       };
     },
-    [brush, editor, tool],
+    [covered, editor, tool],
   );
 
   const run = async (action: () => Promise<void>) => {
@@ -1102,6 +1102,14 @@ export const Studio = ({ status, onChanged }: Props) => {
             <div className="chipswap-brushes">
               {PRESET_BRUSHES.map((candidate) => brushButton(candidate))}
             </div>
+            {brush.kind === "flood" ? (
+              <p className="nt-help">
+                Fill spreads from the pixel you click across every pixel of the
+                same color touching it, and the tool decides what happens to
+                them. Locked pixels stop it — except under Unlock, which
+                spreads through them to give the region back.
+              </p>
+            ) : null}
             {customBrushes.length > 0 ? (
               <div className="chipswap-brush-custom">
                 <div className="chipswap-brush-custom-head">
@@ -1225,13 +1233,6 @@ export const Studio = ({ status, onChanged }: Props) => {
                 </button>
               ))}
             </div>
-            {tool === "fill" ? (
-              <p className="nt-help">
-                Fill spreads from the pixel you click across every pixel of the
-                same color touching it, whatever the brush. Locked pixels stop
-                it.
-              </p>
-            ) : null}
           </section>
 
           <section className="nt-section">
