@@ -67,8 +67,8 @@ function input(overrides: Partial<MarketInput> = {}): MarketInput {
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, contactName: "Alice" },
-      { canister: BOB, ignored: false, contactName: null },
+      { canister: ALICE, ignored: false, ignoredDesigns: [], contactName: "Alice" },
+      { canister: BOB, ignored: false, ignoredDesigns: [], contactName: null },
     ],
     ownedKeys: new Set<string>(),
     holdings: [],
@@ -91,8 +91,8 @@ test("an ignored designer contributes nothing, and nobody else is withheld", () 
   const page = buildMarketPage(
     input({
       directory: [
-        { canister: ALICE, ignored: true, contactName: null },
-        { canister: BOB, ignored: false, contactName: null },
+        { canister: ALICE, ignored: true, ignoredDesigns: [], contactName: null },
+        { canister: BOB, ignored: false, ignoredDesigns: [], contactName: null },
       ],
     }),
     defaultFilter(),
@@ -114,7 +114,7 @@ test("a designer whose last fetch failed keeps the chips they last gave us", () 
           lastError: "not_found",
         },
       ],
-      directory: [{ canister: ALICE, ignored: false, contactName: null }],
+      directory: [{ canister: ALICE, ignored: false, ignoredDesigns: [], contactName: null }],
     }),
     defaultFilter(),
     0,
@@ -164,7 +164,7 @@ test("tagged designs are withheld and tallied rather than dropped silently", () 
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, contactName: null },
+      { canister: ALICE, ignored: false, ignoredDesigns: [], contactName: null },
     ],
   });
 
@@ -261,7 +261,7 @@ test("rows from one designer tie-break on design id, not fetch time", () => {
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, contactName: null },
+      { canister: ALICE, ignored: false, ignoredDesigns: [], contactName: null },
     ],
   });
   expect(
@@ -308,7 +308,7 @@ function facetInput(): MarketInput {
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, contactName: null },
+      { canister: ALICE, ignored: false, ignoredDesigns: [], contactName: null },
     ],
   });
 }
@@ -426,7 +426,7 @@ test("total counts the filtered set, so paging stays honest", () => {
       },
     ],
     directory: [
-      { canister: ALICE, ignored: false, contactName: null },
+      { canister: ALICE, ignored: false, ignoredDesigns: [], contactName: null },
     ],
   });
   const page = buildMarketPage(many, { ...defaultFilter(), sort: "title" }, 2, 2);
@@ -442,5 +442,172 @@ test("an offset past the end yields no rows but keeps the true total", () => {
 
 test("an empty cache is an empty market, not an error", () => {
   const page = buildMarketPage(input({ catalogs: [] }), defaultFilter(), 0, 24);
-  expect(page).toEqual({ rows: [], total: 0, nsfwHidden: 0 });
+  expect(page).toEqual({ rows: [], total: 0, nsfwHidden: 0, ignoredHidden: 0 });
+});
+
+// --- Ignoring one chip --------------------------------------------------
+
+/** Alice publishes two chips; the reader has turned the first one away. */
+function withIgnored(designs = [design(1, "Alpha"), design(3, "Gamma")]) {
+  return input({
+    catalogs: [{ designer: ALICE, designs, fetchedAtMs: 500, lastError: null }],
+    directory: [
+      { canister: ALICE, ignored: false, ignoredDesigns: [1], contactName: null },
+    ],
+  });
+}
+
+test("an ignored chip is withheld from the market and tallied", () => {
+  const page = buildMarketPage(withIgnored(), defaultFilter(), 0, 24);
+
+  expect(page.rows.map((row) => row.title)).toEqual(["Gamma"]);
+  expect(page.total).toBe(1);
+  expect(page.ignoredHidden).toBe(1);
+});
+
+// The filter replaces the set rather than widening it, which is what makes it
+// a list to review: every card in it carries the same action.
+test("asking for ignored chips shows those and nothing else", () => {
+  const page = buildMarketPage(
+    withIgnored(),
+    { ...defaultFilter(), showIgnored: true },
+    0,
+    24,
+  );
+
+  expect(page.rows.map((row) => row.title)).toEqual(["Alpha"]);
+  expect(page.total).toBe(1);
+  // Nothing is being withheld for being ignored: they are what is on screen.
+  expect(page.ignoredHidden).toBe(0);
+});
+
+// The card needs to know which action to offer, and it reads it off the row
+// rather than re-deriving it from the directory.
+test("a row says whether it is one of the ignored ones", () => {
+  const page = buildMarketPage(
+    withIgnored(),
+    { ...defaultFilter(), showIgnored: true },
+    0,
+    24,
+  );
+  expect(page.rows[0]?.ignored).toBe(true);
+
+  const rest = buildMarketPage(withIgnored(), defaultFilter(), 0, 24);
+  expect(rest.rows[0]?.ignored).toBe(false);
+});
+
+// An ignore names one designer's design id. The same id from somebody else is
+// a different chip and stays where it was.
+test("ignoring is per designer, not per design id", () => {
+  const page = buildMarketPage(
+    input({
+      directory: [
+        { canister: ALICE, ignored: false, ignoredDesigns: [2], contactName: null },
+        { canister: BOB, ignored: false, ignoredDesigns: [], contactName: null },
+      ],
+    }),
+    defaultFilter(),
+    0,
+    24,
+  );
+
+  // Alice's ignored id 2 is Bob's design, and Bob's chip is untouched.
+  expect(page.rows.map((row) => row.title)).toEqual(["Beta", "Alpha"]);
+  expect(page.ignoredHidden).toBe(0);
+});
+
+// Two axes, two decisions. A chip that is both needs both asked for.
+test("a tagged chip that is also ignored needs both filters to appear", () => {
+  const both = input({
+    catalogs: [
+      {
+        designer: ALICE,
+        designs: [design(1, "Alpha", { nsfw: true })],
+        fetchedAtMs: 500,
+        lastError: null,
+      },
+    ],
+    directory: [
+      { canister: ALICE, ignored: false, ignoredDesigns: [1], contactName: null },
+    ],
+  });
+
+  expect(buildMarketPage(both, defaultFilter(), 0, 24).total).toBe(0);
+  expect(
+    buildMarketPage(both, { ...defaultFilter(), showNsfw: true }, 0, 24).total,
+  ).toBe(0);
+  expect(
+    buildMarketPage(both, { ...defaultFilter(), showIgnored: true }, 0, 24).total,
+  ).toBe(0);
+  expect(
+    buildMarketPage(
+      both,
+      { ...defaultFilter(), showIgnored: true, showNsfw: true },
+      0,
+      24,
+    ).total,
+  ).toBe(1);
+});
+
+// Ignoring is the owner's own decision about one chip; the tag rule is a
+// blanket. A chip they personally turned away must not also be reported as
+// withheld for a reason they did not choose.
+test("an ignored chip is not also counted against the tag tally", () => {
+  const both = input({
+    catalogs: [
+      {
+        designer: ALICE,
+        designs: [design(1, "Alpha", { nsfw: true }), design(3, "Gamma")],
+        fetchedAtMs: 500,
+        lastError: null,
+      },
+    ],
+    directory: [
+      { canister: ALICE, ignored: false, ignoredDesigns: [1], contactName: null },
+    ],
+  });
+
+  const page = buildMarketPage(both, defaultFilter(), 0, 24);
+  expect(page.ignoredHidden).toBe(1);
+  expect(page.nsfwHidden).toBe(0);
+});
+
+// The tally counts what this axis withheld, not what was already gone.
+test("the ignored tally counts only what the other filters left", () => {
+  const page = buildMarketPage(
+    withIgnored([design(1, "Alpha"), design(3, "Gamma")]),
+    { ...defaultFilter(), search: "gamma" },
+    0,
+    24,
+  );
+
+  expect(page.total).toBe(1);
+  expect(page.ignoredHidden).toBe(0);
+});
+
+// A designer who is ignored withholds their whole catalog, so their per-chip
+// decisions have nothing left to say — but they are still recorded, ready for
+// the day the designer is let back in.
+test("an ignored designer's ignored chips are not tallied twice", () => {
+  const page = buildMarketPage(
+    input({
+      catalogs: [
+        {
+          designer: ALICE,
+          designs: [design(1, "Alpha")],
+          fetchedAtMs: 500,
+          lastError: null,
+        },
+      ],
+      directory: [
+        { canister: ALICE, ignored: true, ignoredDesigns: [1], contactName: null },
+      ],
+    }),
+    defaultFilter(),
+    0,
+    24,
+  );
+
+  expect(page.total).toBe(0);
+  expect(page.ignoredHidden).toBe(0);
 });

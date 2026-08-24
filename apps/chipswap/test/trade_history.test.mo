@@ -5,7 +5,7 @@ import Nat8 "mo:core/Nat8";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Designs "../backend/Designs";
-import Memory "../backend/memory/chipswap/v9";
+import Memory "../backend/memory/chipswap/v10";
 import Shape "../backend/Shape";
 import Trades "../backend/Trades";
 import Wire "../backend/Wire";

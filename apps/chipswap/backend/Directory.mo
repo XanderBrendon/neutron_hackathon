@@ -7,7 +7,8 @@ import Principal "mo:core/Principal";
 import Text "mo:core/Text";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Holdings "./Holdings";
-import Memory "./memory/chipswap/v9";
+import Memory "./memory/chipswap/v10";
+import Wire "./Wire";
 
 // The designer directory: who the owner knows, and what we have concluded
 // about them.
@@ -82,6 +83,10 @@ module {
                         first_seen_ns = now;
                         last_seen_ns = now;
                         ignored = false;
+                        // A designer arrives with nothing turned away. The
+                        // owner has not seen their chips yet, so there is
+                        // nothing they could have decided about one.
+                        ignored_designs = [];
                     },
                 );
                 true;
@@ -176,6 +181,80 @@ module {
             };
             case null false;
         };
+    };
+
+    // --- Turning away one chip --------------------------------------------
+
+    // The narrow sibling of `setIgnored`. Ignoring a designer withholds their
+    // whole catalogue and stops it being fetched; this withholds one chip from
+    // the Market and changes nothing else — their catalogue is still read,
+    // because the other chips are still wanted, and the design is still
+    // tradeable, because a chip you would rather not look at is not one you are
+    // forbidden to acquire.
+    //
+    // The ceiling is what a catalogue can show. A peer's reply is refused past
+    // `Wire.MAX_DESIGNS` designs, so that is the most of one designer the owner
+    // could ever have been shown and therefore the most they could ever have
+    // turned away. Reaching it in ordinary use is not possible, which is the
+    // point: it bounds the table without ever standing in the owner's way.
+    public let MAX_IGNORED_DESIGNS : Nat = Wire.MAX_DESIGNS;
+
+    public type IgnoreResult = { #ok; #err : Text };
+
+    public func designIgnored(
+        mem : Memory.Mem,
+        canister : Principal,
+        designId : Nat,
+    ) : Bool {
+        switch (get(mem, canister)) {
+            case (?entry) contains(entry.ignored_designs, designId);
+            case null false;
+        };
+    };
+
+    func contains(ids : [Nat], designId : Nat) : Bool {
+        for (id in ids.values()) {
+            if (id == designId) return true;
+        };
+        false;
+    };
+
+    // Asking for the state the entry is already in succeeds and writes nothing,
+    // so a double press is not an error and neither is un-ignoring a chip that
+    // was never turned away: the owner asked for a state, and that state is
+    // what they get.
+    public func setDesignIgnored(
+        mem : Memory.Mem,
+        canister : Principal,
+        designId : Nat,
+        ignore_ : Bool,
+    ) : IgnoreResult {
+        // An id outside what the wire carries one in did not come from a peer's
+        // catalogue and cannot name a chip anybody was shown.
+        if (designId == 0 or designId > Wire.MAX_DESIGN_ID) return #err("design_invalid");
+        let ?existing = get(mem, canister) else return #err("not_found");
+        let held = existing.ignored_designs;
+        if (contains(held, designId) == ignore_) return #ok;
+
+        let updated = if (ignore_) {
+            // A full list is a reason to refuse another, never a reason to
+            // refuse taking one off — the way out of the ceiling must not be
+            // behind it.
+            if (held.size() >= MAX_IGNORED_DESIGNS) return #err("ignore_limit");
+            // Ascending and without repeats: a set has no order of its own, so
+            // giving it one keeps two equal lists from reading as different.
+            Array.sort<Nat>(Array.concat<Nat>(held, [designId]), Nat.compare);
+        } else {
+            Array.filter<Nat>(held, func(id) { id != designId });
+        };
+
+        Map.add(
+            mem.directory,
+            Principal.compare,
+            canister,
+            { existing with ignored_designs = updated },
+        );
+        #ok;
     };
 
     public func remove(mem : Memory.Mem, canister : Principal) : Bool {

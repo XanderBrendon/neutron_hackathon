@@ -14,6 +14,7 @@ import Migrate6 "../backend/memory/chipswap/v5_to_v6";
 import Migrate7 "../backend/memory/chipswap/v6_to_v7";
 import Migrate8 "../backend/memory/chipswap/v7_to_v8";
 import Migrate9 "../backend/memory/chipswap/v8_to_v9";
+import Migrate10 "../backend/memory/chipswap/v9_to_v10";
 import V1 "../backend/memory/chipswap/v1";
 import V3 "../backend/memory/chipswap/v3";
 import V4 "../backend/memory/chipswap/v4";
@@ -22,6 +23,7 @@ import V6 "../backend/memory/chipswap/v6";
 import V7 "../backend/memory/chipswap/v7";
 import V8 "../backend/memory/chipswap/v8";
 import V9 "../backend/memory/chipswap/v9";
+import V10 "../backend/memory/chipswap/v10";
 
 // Migration from the released schemas, with something in every root. Compiling
 // proves the shapes line up; only this proves the values arrive intact and that
@@ -760,3 +762,53 @@ assert (brush9.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
 // And an emptied directory is still empty at the end of the whole chain.
 let emptied9 = Migrate9.migrate(emptied8);
 assert (Map.size(emptied9.directory) == 0);
+
+// --- V9 -> V10 ----------------------------------------------------------
+
+// The tenth conversion gives a directory entry somewhere to record the chips of
+// that designer's the owner has turned away. Nobody has turned one away before
+// this release, so an empty list is the truth about every entry that arrives
+// here rather than a default standing in for data that was lost.
+let v10 : V10.Mem = Migrate10.migrate(v9);
+
+assert (v10.revision == v9.revision);
+assert (v10.next_request_seq == v9.next_request_seq);
+assert (v10.next_brush_id == v9.next_brush_id);
+assert (v10.next_history_id == v9.next_history_id);
+assert (Map.size(v10.directory) == Map.size(v9.directory));
+assert (Map.size(v10.designs) == Map.size(v9.designs));
+assert (Map.size(v10.holdings) == Map.size(v9.holdings));
+assert (Map.size(v10.incoming) == Map.size(v9.incoming));
+assert (Map.size(v10.outgoing) == Map.size(v9.outgoing));
+assert (Map.size(v10.replay) == Map.size(v9.replay));
+assert (Map.size(v10.history) == Map.size(v9.history));
+
+// The owner's ignore has now survived nine conversions, and it is still the
+// whole-designer one: the narrower list beside it starts empty, because there
+// was no way to have written to it before now.
+let ?carried10 = Map.get(v10.directory, Principal.compare, peer) else Runtime.trap("missing entry");
+assert (carried10.ignored);
+assert (carried10.source == carried9.source);
+assert (carried10.first_seen_ns == carried9.first_seen_ns);
+assert (carried10.last_seen_ns == carried9.last_seen_ns);
+assert (carried10.ignored_designs == []);
+
+// And so does everything that was never the directory's business.
+let ?draft10 = Map.get(v10.designs, Nat.compare, 3) else Runtime.trap("missing design");
+assert (draft10.state == #draft);
+assert (draft10.art.pixels == Blob.fromArray([0, 1, 0]));
+let ?sent10 = Map.get(v10.holdings, Text.compare, "sent") else Runtime.trap("missing chip");
+switch (sent10.state) {
+    case (#escrowed(details)) assert (details.request_id == requestId);
+    case (_) Runtime.trap("escrow was not preserved");
+};
+let ?outbound10 = Map.get(v10.outgoing, Text.compare, "outbound") else Runtime.trap("missing trade");
+assert (outbound10.state == #pending_designer);
+let ?replay10 = Map.get(v10.replay, Text.compare, "replay") else Runtime.trap("missing replay");
+assert (replay10.outcome == #minted({ design_id = 1; serial = 9; nsfw = false }));
+let ?brush10 = List.get(v10.brushes, 0) else Runtime.trap("missing brush");
+assert (brush10.cells == Blob.fromArray([1, 0, 0, 1, 0, 0, 1, 1, 0]));
+
+// And an emptied directory is still empty at the end of the whole chain.
+let emptied10 = Migrate10.migrate(emptied9);
+assert (Map.size(emptied10.directory) == 0);

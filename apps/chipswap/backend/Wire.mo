@@ -31,6 +31,10 @@ module {
     public let MAX_MESSAGE_BYTES : Nat = 65_536;
 
     public let MAX_DESIGNS : Nat = 10;
+    // A design id travels as a u16, so this is the largest one a catalogue can
+    // name. An id past it did not come from a peer and cannot name a chip
+    // anybody was shown.
+    public let MAX_DESIGN_ID : Nat = 65_535;
     // One page of a directory reply. At 29 bytes a principal plus its length
     // byte, a full page is 3840 bytes, inside the route's 8 KB ceiling.
     public let MAX_DIRECTORY_PAGE : Nat = 128;

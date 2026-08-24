@@ -13,7 +13,7 @@
     "validate": "bun ../../packages/neutron-scripts/src/validate.ts",
     "package": "npm run validate && npm run build && npm run mopack && npm run schema && npm run package:metadata && bun ../../packages/neutron-scripts/src/pack.ts",
     "watch": "bun build.ts watch",
-    "test:motoko": "bun ../../packages/neutron-scripts/src/run_motoko_program.ts test/shape.test.mo test/memory.test.mo test/memory_v4.test.mo test/memory_v5.test.mo test/memory_v6.test.mo test/memory_v7.test.mo test/memory_v8.test.mo test/memory_v9.test.mo test/memory_migration.test.mo test/requirements.test.mo test/principal_text.test.mo test/designs.test.mo test/holdings.test.mo test/directory.test.mo test/wire.test.mo test/wire_fixtures.test.mo test/trades.test.mo test/trade_history.test.mo test/main.test.mo test/contacts_integrity.test.mo",
+    "test:motoko": "bun ../../packages/neutron-scripts/src/run_motoko_program.ts test/shape.test.mo test/memory.test.mo test/memory_v4.test.mo test/memory_v5.test.mo test/memory_v6.test.mo test/memory_v7.test.mo test/memory_v8.test.mo test/memory_v9.test.mo test/memory_v10.test.mo test/memory_migration.test.mo test/requirements.test.mo test/principal_text.test.mo test/designs.test.mo test/holdings.test.mo test/directory.test.mo test/wire.test.mo test/wire_fixtures.test.mo test/trades.test.mo test/trade_history.test.mo test/main.test.mo test/contacts_integrity.test.mo",
     "test": "npm run package && bun test && npm run test:motoko",
     "test:motoko:wasi": "bun scripts/run_motoko_wasi.ts",
     "fixtures:wire": "bun scripts/gen_wire_fixtures.ts"

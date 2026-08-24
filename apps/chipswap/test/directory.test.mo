@@ -8,7 +8,7 @@ import Runtime "mo:core/Runtime";
 import Text "mo:core/Text";
 import Directory "../backend/Directory";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v9";
+import Memory "../backend/memory/chipswap/v10";
 import Shape "../backend/Shape";
 
 func principalOf(seed : Nat) : Principal {
@@ -336,3 +336,113 @@ assert (not Directory.reachable(seeded, Memory.seedDesigner()));
 assert (Directory.served(seeded, self, 0, 10).entries.size() == 0);
 assert (Directory.remove(seeded, Memory.seedDesigner()));
 assert (Directory.get(seeded, Memory.seedDesigner()) == null);
+
+// --- Turning away one chip ----------------------------------------------
+
+// The narrow gesture beside the whole-designer one. Ignoring a designer stops
+// their catalogue being fetched at all; this withholds a single chip from the
+// Market and changes nothing else about them.
+
+let turning = blank();
+ignore Directory.note(turning, alice, #manual, 10);
+ignore Directory.note(turning, bob, #manual, 20);
+
+// Nothing is turned away until the owner says so.
+assert (not Directory.designIgnored(turning, alice, 1));
+assert (Directory.setDesignIgnored(turning, alice, 1, true) == #ok);
+assert (Directory.designIgnored(turning, alice, 1));
+
+// An ignore names one designer's design id. The same id from somebody else is
+// a different chip and is untouched.
+assert (not Directory.designIgnored(turning, bob, 1));
+
+// Setting it to what it already is succeeds and changes nothing, so a double
+// press is not an error.
+assert (Directory.setDesignIgnored(turning, alice, 1, true) == #ok);
+let ?once = Directory.get(turning, alice) else Runtime.trap("missing entry");
+assert (once.ignored_designs == [1]);
+
+// Ascending and without repeats however they were pressed: a set has no order
+// of its own, so giving it one keeps two equal lists from reading as different.
+assert (Directory.setDesignIgnored(turning, alice, 7, true) == #ok);
+assert (Directory.setDesignIgnored(turning, alice, 4, true) == #ok);
+let ?ordered = Directory.get(turning, alice) else Runtime.trap("missing entry");
+assert (ordered.ignored_designs == [1, 4, 7]);
+
+// And it comes back off, leaving the rest of the list where it was.
+assert (Directory.setDesignIgnored(turning, alice, 4, false) == #ok);
+let ?fewer = Directory.get(turning, alice) else Runtime.trap("missing entry");
+assert (fewer.ignored_designs == [1, 7]);
+assert (not Directory.designIgnored(turning, alice, 4));
+
+// Un-ignoring one that was never ignored is not an error either: the owner
+// asked for a state, and that state is what they get.
+assert (Directory.setDesignIgnored(turning, alice, 9, false) == #ok);
+let ?unchanged = Directory.get(turning, alice) else Runtime.trap("missing entry");
+assert (unchanged.ignored_designs == [1, 7]);
+
+// A designer we do not know has nothing to hold the decision, and inventing an
+// entry would add a designer the owner never asked for.
+assert (Directory.setDesignIgnored(turning, carol, 1, true) == #err("not_found"));
+assert (Directory.get(turning, carol) == null);
+assert (not Directory.designIgnored(turning, carol, 1));
+
+// A design id outside what the wire can carry one in cannot name a real chip.
+assert (Directory.setDesignIgnored(turning, alice, 0, true) == #err("design_invalid"));
+assert (Directory.setDesignIgnored(turning, alice, 65_536, true) == #err("design_invalid"));
+
+// The ceiling is what a catalogue can show: a peer's reply is refused past
+// MAX_DESIGNS designs, so that is the most of one designer the owner could ever
+// have been shown, and therefore the most they could ever have turned away.
+let filling = blank();
+ignore Directory.note(filling, alice, #manual, 10);
+var slot = 1;
+while (slot <= Directory.MAX_IGNORED_DESIGNS) {
+    assert (Directory.setDesignIgnored(filling, alice, slot, true) == #ok);
+    slot += 1;
+};
+assert (Directory.setDesignIgnored(filling, alice, 900, true) == #err("ignore_limit"));
+// Taking one off makes room again, and the full list is never a reason to
+// refuse un-ignoring.
+assert (Directory.setDesignIgnored(filling, alice, 1, false) == #ok);
+assert (Directory.setDesignIgnored(filling, alice, 900, true) == #ok);
+
+// Ignoring the designer leaves the per-chip decisions intact. Un-ignoring them
+// should restore what the owner chose rather than a blank list they have to
+// choose all over again.
+let both = blank();
+ignore Directory.note(both, alice, #manual, 10);
+assert (Directory.setDesignIgnored(both, alice, 3, true) == #ok);
+assert (Directory.setIgnored(both, alice, true));
+let ?kept = Directory.get(both, alice) else Runtime.trap("missing entry");
+assert (kept.ignored_designs == [3]);
+assert (Directory.setIgnored(both, alice, false));
+assert (Directory.designIgnored(both, alice, 3));
+
+// Removing the designer takes their turned-away chips with them. There is no
+// second table to sweep, which is the point of keeping the list here.
+assert (Directory.remove(both, alice));
+assert (not Directory.designIgnored(both, alice, 3));
+ignore Directory.note(both, alice, #manual, 30);
+let ?readded = Directory.get(both, alice) else Runtime.trap("missing entry");
+assert (readded.ignored_designs == []);
+
+// A display preference must not be able to pin a directory seat. An entry with
+// chips turned away is evicted on exactly the terms one without them is.
+let pinning = blank();
+ignore Directory.note(pinning, alice, #crawl, 1);
+assert (Directory.setDesignIgnored(pinning, alice, 1, true) == #ok);
+var pinFiller = 200;
+while (Map.size(pinning.directory) < Directory.MAX_DIRECTORY) {
+    ignore Directory.note(pinning, principalOf(pinFiller), #crawl, 1_000 + pinFiller);
+    pinFiller += 1;
+};
+assert (Directory.note(pinning, principalOf(9_500), #crawl, 99_999));
+assert (Directory.get(pinning, alice) == null);
+
+// And nothing about it reaches a peer. What a crawl reads is bare principals,
+// so the owner's preferences cannot leave the canister at all.
+let private_ = blank();
+ignore Directory.note(private_, alice, #manual, 10);
+assert (Directory.setDesignIgnored(private_, alice, 2, true) == #ok);
+assert (Directory.served(private_, self, 0, 10).entries == [alice]);

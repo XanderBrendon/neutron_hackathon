@@ -7,7 +7,7 @@ import Runtime "mo:core/Runtime";
 import NeutronCapabilities "mo:neutron-capabilities";
 import Chipswap "../backend/main";
 import Trades "../backend/Trades";
-import Memory "../backend/memory/chipswap/v9";
+import Memory "../backend/memory/chipswap/v10";
 import Shape "../backend/Shape";
 import Wire "../backend/Wire";
 
@@ -409,6 +409,68 @@ switch (
     case (#err(error)) Runtime.trap("set_ignored: " # error.code);
 };
 assert (chipswap.chipswap_directory({ offset = 0; limit = 10 }).entries[0].ignored == false);
+
+// Turning away one chip is the narrower gesture, and it travels on the same
+// entry: the directory page is where the Market reads what to withhold.
+assert (chipswap.chipswap_directory({ offset = 0; limit = 10 }).entries[0].ignored_designs == []);
+switch (
+    chipswap.chipswap_directory_set_design_ignored({
+        canister = "not-a-principal";
+        design_id = 1;
+        ignored = true;
+    })
+) {
+    case (#ok(_)) Runtime.trap("expected a principal error");
+    case (#err(error)) assert (error.code == "principal_invalid");
+};
+switch (
+    chipswap.chipswap_directory_set_design_ignored({
+        canister = Principal.toText(self);
+        design_id = 1;
+        ignored = true;
+    })
+) {
+    case (#ok(_)) Runtime.trap("expected a miss");
+    case (#err(error)) assert (error.code == "not_found");
+};
+// An id outside what a catalogue can carry one in cannot name a chip anybody
+// was shown.
+switch (
+    chipswap.chipswap_directory_set_design_ignored({
+        canister = Principal.toText(peer);
+        design_id = 0;
+        ignored = true;
+    })
+) {
+    case (#ok(_)) Runtime.trap("expected an invalid design");
+    case (#err(error)) assert (error.code == "design_invalid");
+};
+switch (
+    chipswap.chipswap_directory_set_design_ignored({
+        canister = Principal.toText(peer);
+        design_id = 3;
+        ignored = true;
+    })
+) {
+    case (#ok(_)) {};
+    case (#err(error)) Runtime.trap("set_design_ignored: " # error.code);
+};
+let turnedAwayPage = chipswap.chipswap_directory({ offset = 0; limit = 10 });
+assert (turnedAwayPage.entries[0].ignored_designs == [3]);
+// The designer themselves is untouched: their catalogue is still wanted, which
+// is the whole reason for the narrower gesture.
+assert (turnedAwayPage.entries[0].ignored == false);
+switch (
+    chipswap.chipswap_directory_set_design_ignored({
+        canister = Principal.toText(peer);
+        design_id = 3;
+        ignored = false;
+    })
+) {
+    case (#ok(_)) {};
+    case (#err(error)) Runtime.trap("set_design_ignored: " # error.code);
+};
+assert (chipswap.chipswap_directory({ offset = 0; limit = 10 }).entries[0].ignored_designs == []);
 
 // Brushes persist with validated geometry.
 switch (

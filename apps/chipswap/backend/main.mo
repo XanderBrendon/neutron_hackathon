@@ -13,7 +13,7 @@ import Designs "./Designs";
 import Directory "./Directory";
 import Holdings "./Holdings";
 import IngressWire "./IngressWire";
-import Memory "./memory/chipswap/v9";
+import Memory "./memory/chipswap/v10";
 import PrincipalText "./PrincipalText";
 import Requirements "./Requirements";
 import Shape "./Shape";
@@ -169,12 +169,17 @@ module {
         total : Nat;
     };
 
+    // `ignored_designs` holds the design ids of this designer's chips the owner
+    // has turned away. The Market reads it off the entry rather than asking
+    // separately, because it is already loading the directory to know whose
+    // chips to show at all.
     public type DirectoryEntryView = {
         canister : Text;
         source : Text;
         first_seen_ns : Int;
         last_seen_ns : Int;
         ignored : Bool;
+        ignored_designs : [Nat];
         owns_chip : Bool;
         contact_name : ?Text;
     };
@@ -339,6 +344,12 @@ module {
     public type CanisterRequest = { canister : Text };
 
     public type IgnoreRequest = { canister : Text; ignored : Bool };
+
+    public type IgnoreDesignRequest = {
+        canister : Text;
+        design_id : Nat;
+        ignored : Bool;
+    };
 
     public type SaveBrushRequest = {
         id : ?Nat;
@@ -561,6 +572,7 @@ module {
                             first_seen_ns = entry.first_seen_ns;
                             last_seen_ns = entry.last_seen_ns;
                             ignored = entry.ignored;
+                            ignored_designs = entry.ignored_designs;
                             owns_chip = Holdings.ownsAnyFrom(mem, entry.canister);
                             contact_name = contactName(entry.canister);
                         };
@@ -881,6 +893,29 @@ module {
             };
             if (not Directory.setIgnored(mem, canister, request.ignored)) {
                 return #err(error("not_found"));
+            };
+            bump();
+            #ok({ revision = mem.revision });
+        };
+
+        // The narrower gesture: one chip rather than the whole designer.
+        //
+        // It withholds a row from the Market and nothing else. The designer is
+        // still fetched from, because the rest of their catalogue is still
+        // wanted, and the design is still tradeable — a chip the owner would
+        // rather not look at is not one they are forbidden to acquire.
+        public func /*update*/chipswap_directory_set_design_ignored(
+            request : IgnoreDesignRequest
+        ) : RevisionResult {
+            let canister = switch (parsePrincipal(request.canister)) {
+                case (#err(code)) return #err(error(code));
+                case (#ok(value)) value;
+            };
+            switch (
+                Directory.setDesignIgnored(mem, canister, request.design_id, request.ignored)
+            ) {
+                case (#err(code)) return #err(error(code));
+                case (#ok) {};
             };
             bump();
             #ok({ revision = mem.revision });
@@ -1792,6 +1827,8 @@ module {
             case ("principal_invalid") "That is not a valid principal.";
             case ("principal_not_canister") "A Chipswap address is a canister principal.";
             case ("too_many_targets") "Refresh at most eight designers at a time.";
+            case ("design_invalid") "That is not a design this designer can have published.";
+            case ("ignore_limit") "You have already hidden every chip this designer can publish.";
             case ("requirements_invalid") "A color minimum is 2 to 64, and a coverage cap is 1 to 99 percent.";
             case ("nsfw_rule_invalid") "The NSFW rule is any, disallowed, or required.";
             case ("min_colors") "That chip does not use enough colors for this design.";
@@ -1867,6 +1904,9 @@ public type chipswap_directory_remove_Output = RevisionResult;
 
 public type chipswap_directory_set_ignored_Input = (request : IgnoreRequest);
 public type chipswap_directory_set_ignored_Output = RevisionResult;
+
+public type chipswap_directory_set_design_ignored_Input = (request : IgnoreDesignRequest);
+public type chipswap_directory_set_design_ignored_Output = RevisionResult;
 
 public type chipswap_brush_save_Input = (request : SaveBrushRequest);
 public type chipswap_brush_save_Output = RevisionResult;

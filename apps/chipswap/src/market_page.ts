@@ -28,6 +28,8 @@ import {
 export type MarketDirectoryEntry = {
   canister: string;
   ignored: boolean;
+  /** Design ids of this designer's chips the owner has turned away. */
+  ignoredDesigns: number[];
   contactName: string | null;
 };
 
@@ -50,6 +52,8 @@ export type MarketRow = {
   /** u64 as text, the way it left the peer. */
   designRevision: string;
   owned: boolean;
+  /** Turned away by the owner. The card reads its action off this. */
+  ignored: boolean;
   fetchedAtMs: number;
   contactName: string | null;
 };
@@ -58,6 +62,7 @@ export type MarketPage = {
   rows: MarketRow[];
   total: number;
   nsfwHidden: number;
+  ignoredHidden: number;
 };
 
 export function ownedKey(designer: string, designId: number): string {
@@ -172,6 +177,7 @@ export function buildMarketPage(
         nsfw: design.nsfw,
         designRevision: design.designRevision,
         owned: input.ownedKeys.has(ownedKey(catalog.designer, design.designId)),
+        ignored: entry.ignoredDesigns.includes(design.designId),
         fetchedAtMs: catalog.fetchedAtMs,
         contactName: entry.contactName,
       });
@@ -203,18 +209,26 @@ export function buildMarketPage(
     return true;
   });
 
+  // Ignoring replaces the set rather than trimming it: asked for, it is the
+  // whole of what the market shows, so every card in that view carries the
+  // same action and the list reads as one to review.
+  const chosen = narrowed.filter((row) => row.ignored === filter.showIgnored);
+  const ignoredHidden = filter.showIgnored ? 0 : narrowed.length - chosen.length;
+
   // The tag axis is applied last so the tally counts only rows that survived
   // every other filter. Counting earlier would report chips the reader had
-  // already excluded for some other reason.
-  const nsfwHidden = filter.showNsfw
-    ? 0
-    : narrowed.filter((row) => row.nsfw).length;
-  const visible = filter.showNsfw ? narrowed : narrowed.filter((row) => !row.nsfw);
+  // already excluded for some other reason — and ignoring comes first among
+  // those, because it is the owner's own decision about one chip rather than a
+  // blanket rule, and a chip they turned away themselves should not also be
+  // reported as withheld for a reason they did not choose.
+  const nsfwHidden = filter.showNsfw ? 0 : chosen.filter((row) => row.nsfw).length;
+  const visible = filter.showNsfw ? chosen : chosen.filter((row) => !row.nsfw);
 
   const ranked = sorted(visible, filter.sort);
   return {
     rows: ranked.slice(offset, offset + limit),
     total: ranked.length,
     nsfwHidden,
+    ignoredHidden,
   };
 }

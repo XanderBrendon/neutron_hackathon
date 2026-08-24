@@ -109,6 +109,26 @@ dropped, and you stop handing their address to peers who crawl you. Un-ignoring
 restores the entry, not the catalog: nothing of theirs reappears until the next
 refresh actually fetches something.
 
+**Ignoring a chip.** Ignoring a designer is a blunt instrument: a designer
+whose work you mostly want, bar the two chips you are tired of seeing, leaves
+you choosing between the whole catalog and none of it. So a single chip can be
+turned away instead. **Ignore** on a Market card withholds that chip from the
+grid, and the Market says how many it left out — the same disclosure the NSFW
+tally makes, and for the same reason.
+
+It is deliberately weaker than ignoring the designer. Their catalog is still
+fetched, because the other chips are still wanted. The design is still tradeable,
+because a chip you would rather not look at is not one you are forbidden to
+acquire, so **Trade for this** stays on the card. And nobody but you ever reads
+it: it lives on your directory entry for that designer, and what a crawling peer
+reads from you is bare addresses.
+
+It is also not forgetting. *Show ignored chips* turns the Market into the list of
+what you have turned away, each card offering **Unignore** in place of the button
+that put it there. Removing a designer takes their ignored chips with them;
+ignoring the designer does not, so un-ignoring them restores the decisions you
+had already made rather than a blank list to make again.
+
 **Designers who stop answering.** A designer who uninstalls Chipswap leaves a
 canister that no longer answers, and nothing tells you which of those has
 happened. The kernel does not say *why* a call was rejected, so silence proves
@@ -155,8 +175,14 @@ for them and dropping them.
 Two choices sit above the filters because they are standing ones: *Show NSFW*,
 which is off until you turn it on, and *Refresh catalogs*. Everything else is
 in a collapsed **Filters** section — a title search, a designer, a sort order,
-*Hide chips I already own* (on by default, because the Collection is where
-those belong), and the trade requirements.
+*Hide chips I already own*, *Show ignored chips*, and the trade requirements.
+
+*Show ignored chips* is the one filter that replaces the set rather than
+trimming it: asked for, the Market is the chips you have turned away and nothing
+else. That makes it a list to review, where every card carries the same action,
+rather than a grid to search through for the ones that read differently. It is
+independent of the tag rule, so a chip that is both tagged and ignored needs
+both asked for.
 
 The requirement boxes widen each other rather than narrowing: ticking two shows
 the designs matching either. *Trades I can make* is the one that reads your own
@@ -167,9 +193,9 @@ because approval decides what becomes of an offer that already qualifies rather
 than whether it qualifies; it does not count a draft, which cannot be offered,
 or a chip already escrowed in a trade in flight.
 
-Filtering, sorting and paging all happen in the backend, so the count the header
-gives is the count for the filter you asked for rather than for the page you can
-see.
+Filtering, sorting and paging all happen in the browser, over the copy this
+machine holds, so the count the header gives is the count for the filter you
+asked for rather than for the page you can see.
 
 ## The chipswap_v1 protocol
 
@@ -259,6 +285,7 @@ src/
   editor_state.ts   pure editor reducers with undo and locks
   requirements.ts   what a design asks of an offered chip
   market_filter.ts  the market's filter axes and how they are named
+  market_card.tsx   one chip in the market: what it says and what it offers
   catalog_failure.ts which designers did not answer, and what to say about it
   market_page.ts    the market page, joined and filtered in the tile
   wire.ts           the CSW1 catalog and directory readers, mirroring Wire.mo

@@ -414,6 +414,16 @@
     min-width: 0;
   }
 
+  /* The two things a market card offers, side by side. Turning a chip away is
+     the ghost button of the pair: it is the reversible one, and the trade is
+     what the card is for. */
+  .chipswap-chip-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--nt-gap-1, 4px);
+    margin-top: 4px;
+  }
+
   /* Last in the card and quieter than the rest: taking a picture away is
      something you go looking for, not the first thing the card offers. */
   .chipswap-chip-saves {

@@ -232,6 +232,7 @@ test("a directory entry carries the one flag the market and the crawl read", () 
     first_seen_ns: "1",
     last_seen_ns: "2",
     ignored: true,
+    ignored_designs: [],
     owns_chip: false,
   });
   expect(entry.ignored).toBe(true);
@@ -254,6 +255,7 @@ test("a directory entry says nothing about whether the designer still answers", 
     first_seen_ns: "1",
     last_seen_ns: "2",
     ignored: false,
+    ignored_designs: [],
     owns_chip: false,
   });
   expect(entry).not.toHaveProperty("retired");
@@ -426,4 +428,52 @@ test("an outcome the app does not know is refused rather than rendered", () => {
       contact_name: null,
     }),
   ).toThrow();
+});
+
+// The narrower ignore rides along on the entry, because the Market is already
+// loading the directory to know whose chips to show at all.
+test("a directory entry carries the chips of theirs the owner turned away", () => {
+  const entry = parseDirectoryEntry({
+    canister: "aaaaa-aa",
+    source: "trade",
+    first_seen_ns: "1",
+    last_seen_ns: "2",
+    ignored: false,
+    // Nat crosses the bridge as text, the way every other count does.
+    ignored_designs: ["3", "1"],
+    owns_chip: false,
+  });
+
+  expect(entry.ignoredDesigns).toEqual([3, 1]);
+});
+
+test("a designer with nothing turned away parses to an empty list", () => {
+  const entry = parseDirectoryEntry({
+    canister: "aaaaa-aa",
+    source: "trade",
+    first_seen_ns: "1",
+    last_seen_ns: "2",
+    ignored: false,
+    ignored_designs: [],
+    owns_chip: false,
+  });
+
+  expect(entry.ignoredDesigns).toEqual([]);
+});
+
+// Everything crossing this boundary is parsed rather than trusted: a shape that
+// changed underneath us should fail here rather than halfway through a render.
+test("a directory entry whose turned-away list is malformed is refused", () => {
+  const entry = {
+    canister: "aaaaa-aa",
+    source: "trade",
+    first_seen_ns: "1",
+    last_seen_ns: "2",
+    ignored: false,
+    owns_chip: false,
+  };
+
+  expect(() => parseDirectoryEntry({ ...entry, ignored_designs: "1" })).toThrow();
+  expect(() => parseDirectoryEntry({ ...entry, ignored_designs: [{}] })).toThrow();
+  expect(() => parseDirectoryEntry(entry)).toThrow();
 });

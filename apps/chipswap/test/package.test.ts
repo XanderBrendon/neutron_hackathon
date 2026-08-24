@@ -43,7 +43,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     format: 3,
     id: "chipswap",
     name: "Chipswap",
-    version: 122,
+    version: 125,
     update_source: "233tv-xiaaa-aaaay-aacta-cai",
     src: "main.mo",
     tiles: [
@@ -64,7 +64,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
     // field is.
     memory: {
       chipswap: {
-        version: 9,
+        version: 10,
         schemas: {
           1: { src: "memory/chipswap/v1.mo" },
           2: { src: "memory/chipswap/v2.mo" },
@@ -75,6 +75,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
           7: { src: "memory/chipswap/v7.mo" },
           8: { src: "memory/chipswap/v8.mo" },
           9: { src: "memory/chipswap/v9.mo" },
+          10: { src: "memory/chipswap/v10.mo" },
         },
         migrations: [
           { from: 1, to: 2, src: "memory/chipswap/v1_to_v2.mo" },
@@ -85,6 +86,7 @@ test("chipswap manifest validates and declares its identity and tile", async () 
           { from: 6, to: 7, src: "memory/chipswap/v6_to_v7.mo" },
           { from: 7, to: 8, src: "memory/chipswap/v7_to_v8.mo" },
           { from: 8, to: 9, src: "memory/chipswap/v8_to_v9.mo" },
+          { from: 9, to: 10, src: "memory/chipswap/v9_to_v10.mo" },
         ],
       },
     },
@@ -361,8 +363,8 @@ test("the removed catalog methods are gone from every surface", async () => {
 
 test("the manifest and memory versions advanced together", async () => {
   const manifest = await readManifest();
-  expect(manifest.version).toBe(122);
-  expect(manifest.memory?.chipswap?.version).toBe(9);
+  expect(manifest.version).toBe(125);
+  expect(manifest.memory?.chipswap?.version).toBe(10);
 });
 
 // chipswap_trade_forget cleared terminal rows out of the live outgoing table.
@@ -499,4 +501,18 @@ test("no crawl state survives in the canister", async () => {
   // The schema keeps designers, not walks.
   expect(schema).not.toContain("public type Crawl");
   expect(schema).toContain("directory : Map.Map<Principal, DirectoryEntry>");
+});
+
+// The narrower ignore is an owner-facing edit like every other directory one:
+// preapproved so the tile can make it without a dialog, an update because it
+// writes, and never a route handler — no peer may reach it.
+test("turning away one chip is an owner-facing update", async () => {
+  const manifest = await readManifest();
+  const method = "chipswap_directory_set_design_ignored";
+
+  expect(funcMap(manifest)[method]).toEqual({ type: "update", async: false });
+  expect(manifest.capabilities?.preapproved_self_calls?.methods ?? []).toContain(
+    method,
+  );
+  expect(routes(manifest).map((route) => route.handler)).not.toContain(method);
 });

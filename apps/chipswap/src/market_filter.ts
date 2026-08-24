@@ -29,6 +29,13 @@ export type MarketFilter = {
   hideOwned: boolean;
   /** Tagged chips are left out until they are asked for. */
   showNsfw: boolean;
+  /**
+   * The one axis that replaces the set rather than trimming it: on, the market
+   * shows the chips you have ignored and nothing else. Every card in that view
+   * carries the same action, which is what makes it a list to review rather
+   * than a grid to search.
+   */
+  showIgnored: boolean;
   /** Empty asks for no constraint; two facets widen each other. */
   requirements: RequirementFacet[];
   /** A designer principal, or null for every designer. */
@@ -66,6 +73,9 @@ export function defaultFilter(): MarketFilter {
     // Tagged chips stay out until they are asked for. The market says how many
     // it left out, so this is never a silent omission.
     showNsfw: false,
+    // Ignoring is a standing instruction, so the market honours it on opening
+    // and the reader asks to see what it withheld.
+    showIgnored: false,
     requirements: [],
     designer: null,
     search: "",
@@ -77,6 +87,7 @@ export function isDefaultFilter(filter: MarketFilter): boolean {
   return (
     !filter.hideOwned &&
     !filter.showNsfw &&
+    !filter.showIgnored &&
     filter.requirements.length === 0 &&
     filter.designer === null &&
     filter.search === "" &&
@@ -116,8 +127,41 @@ export function canonicalFacets(
   return canonical(facets);
 }
 
+/**
+ * What an empty grid says about itself.
+ *
+ * An empty market has to say why it is empty, or a filtered one looks like a
+ * broken one. The case this exists for is the reader who has ignored every chip
+ * that matched: the chips are there, they put them out of sight themselves, and
+ * being told to go and add designers would be plainly untrue.
+ */
+export function emptyMarketMessage(
+  filter: MarketFilter,
+  ignoredHidden: number,
+): string {
+  const otherwiseDefault = isDefaultFilter({ ...filter, showIgnored: false });
+  if (filter.showIgnored) {
+    return otherwiseDefault
+      ? "You have not ignored any chips. Ignore one from a card in the market and it will be here."
+      : "No chip you ignored matches these filters. Widen them to see the rest.";
+  }
+  if (ignoredHidden > 0) {
+    return (
+      "Every chip that matched is one you ignored. Tick \u201CShow ignored chips\u201D to see " +
+      (ignoredHidden === 1 ? "it" : "them") +
+      "."
+    );
+  }
+  return otherwiseDefault
+    ? "Nothing here yet. Add designers in the Directory, then refresh catalogs to see what they have published."
+    : "No chip matches these filters. Widen them, or clear them to see the whole market.";
+}
+
 export function filterLabel(filter: MarketFilter): string {
   const parts: string[] = [];
+  // First, because it is the only axis that says what set is on screen at all
+  // rather than which of it survived. Everything after it narrows this one.
+  if (filter.showIgnored) parts.push("Ignored chips");
   if (filter.hideOwned) parts.push("Chips I don't own");
   if (filter.requirements.length > 0) {
     // Joined with "or" because the facets widen each other: ticking two asks

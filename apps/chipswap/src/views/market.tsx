@@ -6,7 +6,6 @@ import {
   type Dispatch,
   type SetStateAction,
 } from "react";
-import { cx } from "neutron-design-system";
 import {
   errorMessage,
   loadCollection,
@@ -15,6 +14,7 @@ import {
   formatMsTimestamp,
   proposeTrade,
   removeDirectoryEntry,
+  setDesignIgnored,
   setDirectoryIgnored,
   shortPrincipal,
   type Chip,
@@ -34,21 +34,21 @@ import {
   ownedKey,
   type MarketRow,
 } from "../market_page.ts";
+import { MarketCard } from "../market_card.tsx";
 import { CATALOG_TTL_MS, staleDesigners } from "../resident/freshness.ts";
 import type { CachedCatalog } from "../resident/store.ts";
-import { ChipCanvas } from "../chip_canvas.tsx";
 import { decodePixels } from "../chip.ts";
 import {
   MAX_SEARCH_CHARS,
   REQUIREMENT_FACETS,
   SORT_OPTIONS,
   defaultFilter,
+  emptyMarketMessage,
   filterLabel,
   isDefaultFilter,
   toggleFacet,
   type MarketSort,
 } from "../market_filter.ts";
-import { PolicyBadges } from "../trade_policy.tsx";
 import {
   check,
   describe as describeRequirements,
@@ -173,6 +173,7 @@ export const Market = ({ status, onChanged, filter, setFilter }: Props) => {
   const rows = page.rows;
   const total = page.total;
   const nsfwHidden = page.nsfwHidden;
+  const ignoredHidden = page.ignoredHidden;
 
   // Read off the catalog cache rather than off the fetch that just ran, so it
   // is the same list whether the refresh was the automatic one on opening or
@@ -203,6 +204,30 @@ export const Market = ({ status, onChanged, filter, setFilter }: Props) => {
         action === "ignore"
           ? "Ignored. They will not be asked again until you say otherwise."
           : "Removed from your directory.",
+      );
+      await onChanged();
+    } catch (error) {
+      setFailure(errorMessage(error));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  // Turning one chip away, or taking it back. It is a directory edit like
+  // ignoring the designer is, but a much narrower one: the designer is still
+  // fetched from and the chip is still tradeable, so nothing is evicted and
+  // nothing is re-read — only the flag the grid filters on changes.
+  const setIgnored = async (row: MarketRow, ignored: boolean) => {
+    setBusy(true);
+    setFailure(null);
+    setMessage(null);
+    try {
+      await setDesignIgnored(row.designer, row.designId, ignored);
+      await load();
+      setMessage(
+        ignored
+          ? `“${row.title}” is hidden. Tick “Show ignored chips” to find it again.`
+          : `“${row.title}” is back in the market.`,
       );
       await onChanged();
     } catch (error) {
@@ -399,6 +424,7 @@ export const Market = ({ status, onChanged, filter, setFilter }: Props) => {
         <span className="nt-section-count">
           {total} chip{total === 1 ? "" : "s"} · {filterLabel(filter)}
           {nsfwHidden > 0 ? ` · ${nsfwHidden} NSFW hidden` : ""}
+          {ignoredHidden > 0 ? ` · ${ignoredHidden} ignored` : ""}
         </span>
       </header>
 
@@ -591,6 +617,23 @@ export const Market = ({ status, onChanged, filter, setFilter }: Props) => {
             <span className="nt-label">Hide chips I already own</span>
           </label>
 
+          {/* The one axis that replaces the set rather than trimming it: asked
+              for, the market is the chips you turned away and nothing else, so
+              every card in it offers the way back. */}
+          <label className="chipswap-check">
+            <input
+              checked={filter.showIgnored}
+              className="nt-checkbox"
+              data-tid="chipswap-show-ignored"
+              onChange={(event) => {
+                const showIgnored = event.currentTarget.checked;
+                amend(() => ({ showIgnored }));
+              }}
+              type="checkbox"
+            />
+            <span className="nt-label">Show ignored chips</span>
+          </label>
+
           <button
             className="nt-button nt-button--ghost nt-button--sm"
             disabled={isDefaultFilter(filter)}
@@ -610,41 +653,17 @@ export const Market = ({ status, onChanged, filter, setFilter }: Props) => {
       {message ? <p className="nt-callout">{message}</p> : null}
 
       {rows.length === 0 ? (
-        <p className="nt-muted">
-          {isDefaultFilter(filter)
-            ? "Nothing here yet. Add designers in the Directory, then refresh catalogs to see what they have published."
-            : "No chip matches these filters. Widen them, or clear them to see the whole market."}
-        </p>
+        <p className="nt-muted">{emptyMarketMessage(filter, ignoredHidden)}</p>
       ) : (
         <ul className="chipswap-grid">
           {rows.map((row) => (
-            <li className="nt-card chipswap-chip-card" key={`${row.designer}:${row.designId}`}>
-              <ChipCanvas
-                label={`${row.title} by ${shortPrincipal(row.designer)}`}
-                palette={row.art.palette}
-                pixels={decodePixels(row.art.pixels)}
-                scale={4}
-              />
-              <div className="chipswap-chip-meta">
-                <strong>{row.title}</strong>
-                <span className="nt-meta" title={row.designer}>
-                  {row.contactName ?? shortPrincipal(row.designer)}
-                </span>
-                <PolicyBadges nsfw={row.nsfw} requirements={row.requirements} />
-                {row.owned ? <span className="nt-tag nt-tag--success">owned</span> : null}
-                <span className="nt-meta">
-                  seen {formatMsTimestamp(row.fetchedAtMs)}
-                </span>
-                <button
-                  className="nt-button nt-button--sm"
-                  disabled={busy}
-                  onClick={() => void openOffer(row)}
-                  type="button"
-                >
-                  Trade for this
-                </button>
-              </div>
-            </li>
+            <MarketCard
+              busy={busy}
+              key={`${row.designer}:${row.designId}`}
+              onSetIgnored={(target, ignored) => void setIgnored(target, ignored)}
+              onTrade={(target) => void openOffer(target)}
+              row={row}
+            />
           ))}
         </ul>
       )}

@@ -4,6 +4,7 @@ import {
   SORT_OPTIONS,
   MAX_SEARCH_CHARS,
   defaultFilter,
+  emptyMarketMessage,
   filterLabel,
   canonicalFacets,
   isDefaultFilter,
@@ -16,6 +17,7 @@ test("the market opens showing owned chips, with tagged chips out of the way", (
   expect(filter).toEqual({
     hideOwned: false,
     showNsfw: false,
+    showIgnored: false,
     requirements: [],
     designer: null,
     search: "",
@@ -28,6 +30,7 @@ test("any axis moved off its default is no longer the default", () => {
   const filter = defaultFilter();
   expect(isDefaultFilter({ ...filter, hideOwned: true })).toBe(false);
   expect(isDefaultFilter({ ...filter, showNsfw: true })).toBe(false);
+  expect(isDefaultFilter({ ...filter, showIgnored: true })).toBe(false);
   expect(isDefaultFilter({ ...filter, requirements: ["open"] })).toBe(false);
   expect(isDefaultFilter({ ...filter, designer: "aaaaa-aa" })).toBe(false);
   expect(isDefaultFilter({ ...filter, search: "moon" })).toBe(false);
@@ -107,17 +110,26 @@ test("the label names only the axes that are narrowing the view", () => {
   // Showing tagged chips widens the view rather than narrowing it, so it is
   // the one setting worth naming when it is not the default.
   expect(filterLabel({ ...defaultFilter(), showNsfw: true })).toBe("NSFW shown");
+  // Ignoring is the one axis that replaces the set rather than trimming it, so
+  // it is named first: it says what you are looking at at all.
+  expect(filterLabel({ ...defaultFilter(), showIgnored: true })).toBe(
+    "Ignored chips",
+  );
   // Every axis at once still reads in the canonical order.
   expect(
     filterLabel({
       hideOwned: true,
       showNsfw: true,
+      showIgnored: true,
       requirements: ["open"],
       designer: "aaaaa-aa",
       search: "moon",
       sort: "title",
     }),
-  ).toBe("Chips I don't own · Swaps freely · one designer · \u201Cmoon\u201D · NSFW shown");
+  ).toBe(
+    "Ignored chips · Chips I don't own · Swaps freely · one designer · " +
+      "\u201Cmoon\u201D · NSFW shown",
+  );
 });
 
 // A search longer than the ceiling says nothing a shorter one does not, and an
@@ -126,4 +138,42 @@ test("the label names only the axes that are narrowing the view", () => {
 test("a search past the ceiling is cut to it rather than refused", () => {
   const long = "a".repeat(MAX_SEARCH_CHARS + 10);
   expect(normalizedSearch(long)).toHaveLength(MAX_SEARCH_CHARS);
+});
+
+// An empty grid has to say why it is empty. "Nothing here yet, add designers"
+// is the wrong answer when the chips are there and the reader put them out of
+// sight themselves — it makes a filtered market look like a broken one.
+test("an empty market says the chips were ignored rather than missing", () => {
+  expect(emptyMarketMessage(defaultFilter(), 3)).toBe(
+    "Every chip that matched is one you ignored. Tick \u201CShow ignored chips\u201D to see them.",
+  );
+  expect(emptyMarketMessage(defaultFilter(), 1)).toBe(
+    "Every chip that matched is one you ignored. Tick \u201CShow ignored chips\u201D to see it.",
+  );
+});
+
+test("an empty ignored list says it is empty rather than filtered", () => {
+  expect(emptyMarketMessage({ ...defaultFilter(), showIgnored: true }, 0)).toBe(
+    "You have not ignored any chips. Ignore one from a card in the market and it will be here.",
+  );
+});
+
+// Reviewing the ignored list with a search in the box is a different miss, and
+// telling the reader they have ignored nothing would be plainly untrue.
+test("a narrowed ignored list blames the filters rather than the list", () => {
+  expect(
+    emptyMarketMessage(
+      { ...defaultFilter(), showIgnored: true, search: "moon" },
+      0,
+    ),
+  ).toBe("No chip you ignored matches these filters. Widen them to see the rest.");
+});
+
+test("an empty market with nothing ignored reads as it always did", () => {
+  expect(emptyMarketMessage(defaultFilter(), 0)).toBe(
+    "Nothing here yet. Add designers in the Directory, then refresh catalogs to see what they have published.",
+  );
+  expect(emptyMarketMessage({ ...defaultFilter(), search: "moon" }, 0)).toBe(
+    "No chip matches these filters. Widen them, or clear them to see the whole market.",
+  );
 });

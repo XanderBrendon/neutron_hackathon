@@ -39,6 +39,10 @@
         "9": {
           "hash": "c074fa745c25517155dd3b0974b9c5351403e79d1850a5d113f7494d2bf9d425",
           "entry": "78b1445d8ffed65377c7562c87424228878803291d9c99887a0a95a148f003b2"
+        },
+        "10": {
+          "hash": "6a995797afd2ba1d5c48566e5530119d8b31fe6c8b752dc77a69e96f9d33e1c7",
+          "entry": "946df52179d1aa984475f4ccc408070624c938d1e52b80fc5baa87f29b12eb95"
         }
       },
       "migrations": {
@@ -49,7 +53,8 @@
         "5->6": "2c06dc200ca76d72f2cc1d74a58ff1d5b8e37a1d69687a256a57c0e1920179f1",
         "6->7": "023ea6c442e59d6aac84128cc21126b718c131ade95e28b9fd710b32a4e576ad",
         "7->8": "e9b5d9b6bfe32176ba11d81637190c9b1a7a5f0fe3cea0ccbbfe6132dcbcad05",
-        "8->9": "b2cda17c9f9e979f42d57dd268a3f728169f3673d7df36b314e4a9736ee5a11f"
+        "8->9": "b2cda17c9f9e979f42d57dd268a3f728169f3673d7df36b314e4a9736ee5a11f",
+        "9->10": "e4bbe656ffe359ccdbc6d268a83d3979007c539b296dd0ace860f7bd21a316d1"
       }
     }
   }

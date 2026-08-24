@@ -4,7 +4,7 @@ import Nat8 "mo:core/Nat8";
 import Principal "mo:core/Principal";
 import Runtime "mo:core/Runtime";
 import Holdings "../backend/Holdings";
-import Memory "../backend/memory/chipswap/v9";
+import Memory "../backend/memory/chipswap/v10";
 import Shape "../backend/Shape";
 
 let alice = Principal.fromBlob(Blob.fromArray([0, 1, 1]));

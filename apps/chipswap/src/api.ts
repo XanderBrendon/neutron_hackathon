@@ -104,6 +104,8 @@ export type DirectoryEntry = {
   firstSeenNs: string;
   lastSeenNs: string;
   ignored: boolean;
+  /** Design ids of this designer's chips the owner has turned away. */
+  ignoredDesigns: number[];
   ownsChip: boolean;
   contactName: string | null;
 };
@@ -234,6 +236,11 @@ function optionalText(value: unknown, label: string): string | null {
 
 function optionalNat(value: unknown, label: string): number | null {
   return value === undefined || value === null ? null : natNumber(value, label);
+}
+
+function natList(value: unknown, label: string): number[] {
+  if (!Array.isArray(value)) throw new Error(`Invalid ${label}`);
+  return value.map((entry) => natNumber(entry, label));
 }
 
 function bool(value: unknown, label: string): boolean {
@@ -392,6 +399,7 @@ export function parseDirectoryEntry(value: unknown): DirectoryEntry {
     firstSeenNs: nsText(source.first_seen_ns, "first seen"),
     lastSeenNs: nsText(source.last_seen_ns, "last seen"),
     ignored: bool(source.ignored, "ignored flag"),
+    ignoredDesigns: natList(source.ignored_designs, "ignored designs"),
     ownsChip: bool(source.owns_chip, "ownership flag"),
     contactName: optionalText(source.contact_name, "contact name"),
   };
@@ -736,6 +744,21 @@ export async function setDirectoryIgnored(
   return parseRevision(
     await updateSelf("chipswap_directory_set_ignored", [
       { canister, ignored },
+    ] as unknown as JsonValue[]),
+  );
+}
+
+// The narrower gesture: one chip rather than the whole designer. It rides on
+// the same directory entry, so it needs no fetch of its own and it goes when
+// the designer does.
+export async function setDesignIgnored(
+  canister: string,
+  designId: number,
+  ignored: boolean,
+): Promise<number> {
+  return parseRevision(
+    await updateSelf("chipswap_directory_set_design_ignored", [
+      { canister, design_id: String(designId), ignored },
     ] as unknown as JsonValue[]),
   );
 }
