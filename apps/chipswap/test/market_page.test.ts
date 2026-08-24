@@ -136,19 +136,21 @@ test("the contact name rides along from the directory", () => {
   expect(page.rows.find((row) => row.title === "Beta")?.contactName).toBeNull();
 });
 
-test("owned chips are hidden by default and flagged when shown", () => {
+test("owned chips are shown and flagged by default, and hidden when asked", () => {
   const ownedKeys = new Set([ownedKey(ALICE, 1)]);
-  expect(buildMarketPage(input({ ownedKeys }), defaultFilter(), 0, 24).total).toBe(1);
-
-  const shown = buildMarketPage(
-    input({ ownedKeys }),
-    { ...defaultFilter(), hideOwned: false },
-    0,
-    24,
-  );
+  const shown = buildMarketPage(input({ ownedKeys }), defaultFilter(), 0, 24);
   expect(shown.total).toBe(2);
   expect(shown.rows.find((row) => row.title === "Alpha")?.owned).toBe(true);
   expect(shown.rows.find((row) => row.title === "Beta")?.owned).toBe(false);
+
+  const hidden = buildMarketPage(
+    input({ ownedKeys }),
+    { ...defaultFilter(), hideOwned: true },
+    0,
+    24,
+  );
+  expect(hidden.total).toBe(1);
+  expect(hidden.rows.find((row) => row.title === "Alpha")).toBeUndefined();
 });
 
 test("tagged designs are withheld and tallied rather than dropped silently", () => {

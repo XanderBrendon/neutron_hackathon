@@ -41,6 +41,10 @@ import {
   toggleFacet,
   type MarketSort,
 } from "../market_filter.ts";
+import {
+  readStoredFilter,
+  writeStoredFilter,
+} from "../market_filter_store.ts";
 import { PolicyBadges } from "../trade_policy.tsx";
 import {
   check,
@@ -86,11 +90,15 @@ type Props = {
 };
 
 export const Market = ({ status, onChanged }: Props) => {
-  const [filter, setFilter] = useState<MarketFilter>(defaultFilter());
+  // Read once, on the first render: the Market is unmounted every time the
+  // reader looks at another tab, so the filter they chose lives in the browser
+  // rather than in this component.
+  const [filter, setFilter] = useState<MarketFilter>(readStoredFilter);
   const [filtersOpen, setFiltersOpen] = useState(false);
   // The box is its own state so a query is not sent for every keystroke. The
-  // filter is what the market was actually asked for.
-  const [searchDraft, setSearchDraft] = useState("");
+  // filter is what the market was actually asked for, and a remembered search
+  // has to start out in both or the box would look empty while it applied.
+  const [searchDraft, setSearchDraft] = useState(filter.search);
   const [designers, setDesigners] = useState<DirectoryEntry[]>([]);
   const [offset, setOffset] = useState(0);
   const [failure, setFailure] = useState<string | null>(null);
@@ -238,6 +246,13 @@ export const Market = ({ status, onChanged }: Props) => {
     // `catalogs`: refreshing writes catalogs, and watching them here would
     // start the next refresh from the result of the last one.
   }, [loaded, designers]);
+
+  // Written from the filter rather than from each control, so every way of
+  // changing it — a checkbox, the debounced search, clearing them all — is
+  // remembered the same way.
+  useEffect(() => {
+    writeStoredFilter(filter);
+  }, [filter]);
 
   useEffect(() => {
     if (searchDraft === filter.search) return;
